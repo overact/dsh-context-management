@@ -10,6 +10,7 @@ if (!dshRoot) {
   catch { throw new Error('Install the DSH dev dependency, or set DSH_PACKAGE_DIR to the installed @deepseek-ai/dsh package directory.'); }
 }
 const fromDsh = createRequire(join(dshRoot, 'package.json'));
+export { dshRoot };
 export async function dsh(name) { return import(pathToFileURL(fromDsh.resolve('@deepseek-ai/' + name)).href); }
 export const { Context } = await dsh('cordis');
 export const { Session, SessionStore } = await dsh('dsh-session');

@@ -9,5 +9,6 @@ function check(dir) {
   }
 }
 check('lib');
+check('scripts');
 check('test');
 console.log('Syntax checks passed.');

@@ -6,7 +6,7 @@
 
 ## 当前适配
 
-版本 **0.3.0**，已针对 **DSH 0.1.7-alpha.1 / 0.1.7-rc.2 / Node.js ≥ 22.15** 验证。peer 范围为 `>=0.1.7-alpha.1`（不设上限）：DSH 0.1.7-rc.1 起会在启动时跳过 peer 范围不含当前版本的插件，设上限会让插件在 DSH 升级后被静默跳过；升级后跑一遍测试即可。
+版本 **0.3.0**，已针对 **DSH 0.1.7-rc.2 / Node.js ≥ 22.15** 验证。peer 范围为 `>=0.1.7-alpha.1`（不设上限）：DSH 0.1.7-rc.1 起会在启动时跳过 peer 范围不含当前版本的插件，设上限会让插件在 DSH 升级后被静默跳过。兼容性改由[安装前检查](#安装前检查)按功能判断，而不是按版本号。
 
 - 通过 DSH 官方扩展点工作：`@local/dsh-context-management/compaction` 是 `BasicCompactionEngine` 的子类，重写官方子类钩子 `summarize()` 和动态分派的 `compactIfNeeded()`；不 monkey-patch 实例方法，不读取 Cordis 内部结构。
 - 复用原生的工具调用配对检查、保留近期对话、并发维护锁、取消、缩减检查、压缩事务、落盘和 overflow 重试。
@@ -78,21 +78,48 @@
    cd dsh-context-management && npm install
    ```
 
-2. 在 profile 目录（`$DSH_HOME/profiles/<profile>/`）的 `package.json` 的 `dependencies` 中加入本地链接，然后在该目录运行 `pnpm install`：
+2. 运行[安装前检查](#安装前检查)，确认当前 DSH 具备插件需要的全部功能、profile 中没有冲突：
+
+   ```bash
+   npm run preflight -- --profile web
+   ```
+
+3. 在 profile 目录（`$DSH_HOME/profiles/<profile>/`）的 `package.json` 的 `dependencies` 中加入本地链接，然后在该目录运行 `pnpm install`：
 
    ```json
    "@local/dsh-context-management": "link:<插件目录>"
    ```
 
-3. 在 profile 的 `cordis.patch.yml` 中注册插件（见下方配置）。
+4. 在 profile 的 `cordis.patch.yml` 中注册插件（见下方配置）。
 
-4. 让 Web preset 挂载换窗引擎（见 [DSH Web preset 作用域](#dsh-web-preset-作用域)）：
+5. 让 Web preset 挂载换窗引擎（见 [DSH Web preset 作用域](#dsh-web-preset-作用域)）：
 
    ```bash
    node scripts/sync-presets.mjs --profile web
    ```
 
-5. 重启 DSH 并刷新网页。
+   该脚本写入前会再次运行安装前检查，失败时不修改 profile。
+
+6. 重启 DSH 并刷新网页。
+
+## 安装前检查
+
+`scripts/preflight.mjs` 检查目标 DSH 是否**真的提供**插件用到的每项功能，以及 profile 中是否有冲突。它**不比较版本号**：检查清单从 `lib/` 源码中自动提取（DSH 导入、`ctx.<服务>.<方法>` 调用、事件、会话日志事件类型、基类钩子、工具名与命令名），代码新增用法时无需修改检查脚本。
+
+| 检查 | 级别 | 内容 |
+| --- | --- | --- |
+| DSH 导入 | 失败 | 目标 DSH 的包确实导出插件导入的函数/类 |
+| 压缩钩子 | 失败 | `BasicCompactionEngine` 原型上有插件重写/调用的方法（`summarize()`、`compactIfNeeded()`） |
+| 宿主服务 | 失败 | 提供 `tools`、`sessions`、`commands`、`systemPrompt`、`settings`、`llm`、`tokenMeter` 的包里存在插件调用的方法 |
+| 宿主事件、会话日志类型 | 失败 | DSH 仍会发出插件监听的事件和会话事件类型 |
+| Web preset | 失败 | 有自带 preset 挂载原生压缩引擎，换窗引擎才有位置可挂 |
+| 笔记存储 | 失败 | `$DSH_HOME` 下的笔记目录可写 |
+| 工具名、命令名 | 失败 | DSH 本身或 profile 中其他插件没有定义同名工具或命令 |
+| preset 归属 | 失败 | profile 没有在生成块之外覆盖同一批 preset |
+| 网页端包与服务 | 警告 | 设置页依赖的客户端包和 `configForms`/`slots`/`locale` 服务存在；缺失时 `/ctx` 仍可用 |
+| 其他压缩引擎 | 警告 | profile 中其他基于压缩引擎的插件，提示检查是否替换同一 preset 行 |
+
+有失败项时退出码为 1。`sync-presets.mjs` 的写入和 `--check` 都会先运行它；在 DSH 启动脚本里运行 `--check`，每次升级后启动时就会按功能复查一次。`--remove` 回滚不做检查。
 
 ## 配置
 
@@ -151,7 +178,23 @@ npm run verify
 
 历史读取是增量的：10,000 条合成事件的首次状态构建约 2.5 ms，未变化时重复读取扫描 **0 条事件**（绝对时间仅供参考；回归测试约束的是增量读取、扫描上限和输出上限）。
 
-0.3.0 在 DSH 0.1.7-rc.2（及回滚目标 0.1.7-alpha.1）上通过 57 项测试。
+0.3.0 在 DSH 0.1.7-rc.2 上通过 62 项测试（含安装前检查：用只缺少某个钩子的替身 DSH 验证它只报告该项功能）。
+
+## 代码结构
+
+| 模块 | 职责 |
+| --- | --- |
+| `lib/index.js` | 宿主插件：配置 schema、工具与命令注册、`contextWindows` 服务、设置变更 |
+| `lib/compaction.js` | preset 中的压缩引擎，`BasicCompactionEngine` 子类，宿主缺席时退回原生行为 |
+| `lib/window-controller.js` / `window-engine.js` / `window-policy.js` / `token-budget-guard.js` | 换窗时机、交接内容构建、按模型选择策略、预算提醒 |
+| `lib/session-state.js` | 每个会话的增量状态投影（窗口、goal/todo、待处理请求） |
+| `lib/history-store.js` / `lib/tools/history.js` | 会话日志的分页检索与 history 工具 |
+| `lib/notes-store.js` / `lib/note-repository.js` / `lib/tools/notes.js` | 内存笔记模型、带锁的原子落盘、notes 工具 |
+| `lib/tools/new-context.js` | `new_context` 工具 |
+| `lib/text.js` | 消息文本提取与截断 |
+| `lib/client.js` | 网页设置页（lazy-CJS 客户端模块） |
+| `scripts/preflight.mjs` | 安装前功能检查 |
+| `scripts/sync-presets.mjs` / `presets.mjs` / `dsh-env.mjs` | preset 同步 CLI、preset 改写逻辑、DSH 与 profile 定位 |
 
 ## 许可证
 

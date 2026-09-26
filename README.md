@@ -6,7 +6,7 @@ Checkpoint windowing, session-private notes and paged history recall for [DeepSe
 
 ## Compatibility
 
-Version **0.3.0**, verified on **DSH 0.1.7-alpha.1 / 0.1.7-rc.2 / Node.js ≥ 22.15**. Peer ranges are `>=0.1.7-alpha.1` with no upper bound: since 0.1.7-rc.1, DSH skips at startup any plugin whose peer range excludes the running version, so an upper bound would silently disable the plugin after a DSH upgrade. Re-run the tests after upgrading instead.
+Version **0.3.0**, verified on **DSH 0.1.7-rc.2 / Node.js ≥ 22.15**. Peer ranges are `>=0.1.7-alpha.1` with no upper bound: since 0.1.7-rc.1, DSH skips at startup any plugin whose peer range excludes the running version, so an upper bound would silently disable the plugin after a DSH upgrade. Compatibility is judged by capability instead, through the [preflight check](#preflight-check).
 
 - Works through official DSH extension points: `@local/dsh-context-management/compaction` subclasses `BasicCompactionEngine` and overrides the `summarize()` hook and the dynamically dispatched `compactIfNeeded()`. No instance monkey-patching, no reads of Cordis internals.
 - Reuses the native tool-call pairing checks, recent-turn retention, maintenance lock, cancellation, shrink check, compaction transaction, persistence and overflow retry.
@@ -78,21 +78,48 @@ This plugin is not published to npm; the `@local/` scope marks it as a local plu
    cd dsh-context-management && npm install
    ```
 
-2. In the profile directory (`$DSH_HOME/profiles/<profile>/`), add a local link to `dependencies` in `package.json`, then run `pnpm install` there:
+2. Run the [preflight check](#preflight-check) to confirm the installed DSH provides every capability the plugin needs and nothing in the profile collides with it:
+
+   ```bash
+   npm run preflight -- --profile web
+   ```
+
+3. In the profile directory (`$DSH_HOME/profiles/<profile>/`), add a local link to `dependencies` in `package.json`, then run `pnpm install` there:
 
    ```json
    "@local/dsh-context-management": "link:<plugin-dir>"
    ```
 
-3. Register the plugin in the profile's `cordis.patch.yml` (see Configuration below).
+4. Register the plugin in the profile's `cordis.patch.yml` (see Configuration below).
 
-4. Mount the windowing engine in the web presets (see [DSH web preset scope](#dsh-web-preset-scope)):
+5. Mount the windowing engine in the web presets (see [DSH web preset scope](#dsh-web-preset-scope)):
 
    ```bash
    node scripts/sync-presets.mjs --profile web
    ```
 
-5. Restart DSH and refresh the page.
+   The script re-runs the preflight before writing and leaves the profile untouched if it fails.
+
+6. Restart DSH and refresh the page.
+
+## Preflight check
+
+`scripts/preflight.mjs` checks that the target DSH **actually provides** each capability the plugin uses, and that nothing in the profile collides with it. It **never compares version numbers**: the requirement list is extracted from the `lib/` sources (DSH imports, `ctx.<service>.<method>` calls, events, session-log event types, base-class hooks, tool and command names), so new usages in the code are covered without touching the check.
+
+| Check | Level | What it verifies |
+| --- | --- | --- |
+| DSH imports | fail | The target DSH packages really export the functions/classes the plugin imports |
+| Compaction hooks | fail | `BasicCompactionEngine`'s prototype has the methods the plugin overrides or calls (`summarize()`, `compactIfNeeded()`) |
+| Host services | fail | The packages providing `tools`, `sessions`, `commands`, `systemPrompt`, `settings`, `llm`, `tokenMeter` have the methods the plugin calls |
+| Host events, session-log types | fail | DSH still emits the events and session event types the plugin listens for |
+| Web presets | fail | Some shipped preset mounts the native engine, so the windowing engine has a slot to take |
+| Notes storage | fail | The notes directory under `$DSH_HOME` is writable |
+| Tool and command names | fail | Neither DSH itself nor another profile plugin defines a tool or command with the same name |
+| Preset ownership | fail | The profile does not already override the same presets outside the generated block |
+| Web client packages and services | warn | The client packages and `configForms`/`slots`/`locale` services behind the settings page exist; without them `/ctx` still works |
+| Other compaction engines | warn | Other profile plugins built on the compaction engine, to check they do not replace the same preset rows |
+
+It exits with code 1 when any fail-level check fails. `sync-presets.mjs` runs it before writing and in `--check`; run `--check` from your DSH start-up script and every start after an upgrade re-checks the capabilities. `--remove` (rollback) skips it.
 
 ## Configuration
 
@@ -151,7 +178,23 @@ Coverage includes the real Cordis lifecycle, DSH ToolRuntime, SettingsProvider, 
 
 History reads are incremental: building state for 10,000 synthetic events takes ~2.5 ms the first time, and an unchanged re-read scans **0 events** (timings are indicative only; the regression tests pin incremental reads, scan limits and output limits).
 
-0.3.0 passes 57 tests on DSH 0.1.7-rc.2 (and the rollback target 0.1.7-alpha.1).
+0.3.0 passes 62 tests on DSH 0.1.7-rc.2, including the preflight: a stand-in DSH missing one hook must make it report exactly that capability.
+
+## Code layout
+
+| Module | Responsibility |
+| --- | --- |
+| `lib/index.js` | Host plugin: config schema, tool and command registration, `contextWindows` service, settings changes |
+| `lib/compaction.js` | Preset compaction engine, a `BasicCompactionEngine` subclass that falls back to native behaviour without the host |
+| `lib/window-controller.js` / `window-engine.js` / `window-policy.js` / `token-budget-guard.js` | When to switch windows, building the handoff, per-model strategy, budget reminder |
+| `lib/session-state.js` | Incremental per-session state projection (windows, goal/todo, pending requests) |
+| `lib/history-store.js` / `lib/tools/history.js` | Paged session-log recall and the history tools |
+| `lib/notes-store.js` / `lib/note-repository.js` / `lib/tools/notes.js` | In-memory note model, locked atomic persistence, the notes tools |
+| `lib/tools/new-context.js` | The `new_context` tool |
+| `lib/text.js` | Message text extraction and clipping |
+| `lib/client.js` | Web settings page (lazy-CJS client module) |
+| `scripts/preflight.mjs` | Pre-install capability check |
+| `scripts/sync-presets.mjs` / `presets.mjs` / `dsh-env.mjs` | Preset sync CLI, preset rewriting, locating DSH and the profile |
 
 ## License
 

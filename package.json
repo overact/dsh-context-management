@@ -13,6 +13,9 @@
   },
   "files": [
     "lib",
+    "scripts/dsh-env.mjs",
+    "scripts/presets.mjs",
+    "scripts/preflight.mjs",
     "scripts/sync-presets.mjs",
     "README.md",
     "README.zh-CN.md",
@@ -23,6 +26,7 @@
     "node": ">=22.15"
   },
   "scripts": {
+    "preflight": "node scripts/preflight.mjs",
     "test": "node --experimental-test-isolation=none --test test/*.test.js",
     "check": "node scripts/check.mjs",
     "verify": "npm run check && npm run test"
