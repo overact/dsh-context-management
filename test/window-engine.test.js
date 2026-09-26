@@ -37,6 +37,8 @@ test('generated handoffs are bounded and keep the session snapshot', () => {
     assert.equal(handoff.record.summary_kind, 'generated');
     assert.ok(handoff.header.length <= budget, `${handoff.header.length} > ${budget}`);
     assert.match(handoff.header, /<generated_handoff>\n## Primary Request/);
+    // Directory previews skip the summary's headings.
+    assert.match(handoff.header, /\nwin_001 \(start item_0\): g{20}/);
     assert.match(handoff.header, /\(p\/m\)/);
     assert.match(handoff.header, /Finish YAML/); assert.match(handoff.header, /User 3/);
     // Recent instructions are quoted up to 1,000 characters each, not a 200-character topic.
