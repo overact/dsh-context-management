@@ -16,6 +16,26 @@
 - 只有 DSH 真正提交替换消息，窗口编号才推进。失败、取消和无可压缩历史不会假报换窗成功。
 - 每次换窗都会生成一份有长度上限的交接。默认（`handoffSummary: generated`）对被换出的部分调用**一次**原生摘要模型，把摘要放进 `<generated_handoff>`，并与目标、待办、近期用户指令、近期笔记和窗口目录一起组成交接；`compaction/summary` 事件记录真实摘要模型的 provider/model/usage，费用统计可见。摘要调用失败时退回截取式交接，不阻塞换窗。`handoffSummary: extractive` 完全不额外调用模型。停用插件或工具时回退原生摘要生成。
 
+## 工作原理
+
+```mermaid
+flowchart TD
+  P["每一步开始前"] --> Q{"有 new_context 请求？"}
+  Q -- 否 --> U{"用量 ≥ 自动压缩阈值？"}
+  U -- 否 --> C["继续对话"]
+  U -- 是 --> K1["压缩旧消息<br/>原文保留最近 16%"]
+  Q -- 是 --> K0["压缩旧消息<br/>只留最后一条"]
+  M["手动 /compact"] --> K0
+  O["模型报上下文溢出"] --> K0
+  K0 & K1 --> S["调用一次摘要模型"]
+  S --> H["拼交接：摘要 + goal/todo<br/>+ 最近 4 条用户原文 + 笔记 + 窗口目录"]
+  H --> W["进入新窗口 win_N+1<br/>系统提示词和工具不变"]
+  W --> N["替换 handoff.md<br/>追加 handoff-log.md"]
+  W --> R["模型按需用 history_* / notes_*<br/>找回原始细节"]
+```
+
+四种入口最后都走同一条换窗流程。摘要调用失败时退回截取式交接；停用插件时，DSH 原生压缩照常运行。阈值和原文保留量是 DSH 自己的设置（`thresholdRatio`、`headroomTokens`、`retainRatio`），插件不改动它们。
+
 ## 工具
 
 | 工具 | 作用 |

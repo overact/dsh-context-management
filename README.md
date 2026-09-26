@@ -16,6 +16,26 @@ Version **0.3.0**, verified on **DSH 0.1.7-rc.2 / Node.js ≥ 22.15**. Peer rang
 - The window number only advances once DSH actually commits the replacement messages. Failures, cancellations and "nothing to compact" never report a successful switch.
 - Every window switch builds a bounded handoff. By default (`handoffSummary: generated`) the native summary model is called **once** on the outgoing region and its result is wrapped in `<generated_handoff>`, together with the goal, todos, recent user instructions, recent notes and the window index. The `compaction/summary` event records the real provider/model/usage, so the cost shows up in usage accounting. If that call fails the handoff falls back to an extractive one without blocking the switch; `handoffSummary: extractive` never makes the extra call. Disabling the plugin or its tools falls back to native summaries.
 
+## How it works
+
+```mermaid
+flowchart TD
+  P["Before every agent step"] --> Q{"new_context requested?"}
+  Q -- no --> U{"Usage at or above the<br/>auto-compaction threshold?"}
+  U -- no --> C["Continue the conversation"]
+  U -- yes --> K1["Compact older messages<br/>keep the latest 16% verbatim"]
+  Q -- yes --> K0["Compact older messages<br/>keep only the last message"]
+  M["Manual /compact"] --> K0
+  O["Provider reports context overflow"] --> K0
+  K0 & K1 --> S["One call to the summary model"]
+  S --> H["Build the handoff: summary + goal/todo<br/>+ last 4 user instructions verbatim + notes + window index"]
+  H --> W["Enter window win_N+1<br/>system prompt and tools unchanged"]
+  W --> N["Replace handoff.md<br/>append to handoff-log.md"]
+  W --> R["Model recovers exact details on demand<br/>with history_* / notes_*"]
+```
+
+All four entry points end in the same switch. If the summary call fails, the handoff falls back to extractive excerpts; with the plugin disabled, DSH's native compaction runs unchanged. The threshold and the verbatim tail are DSH's own settings (`thresholdRatio`, `headroomTokens`, `retainRatio`), which this plugin does not change.
+
 ## Tools
 
 | Tool | Purpose |
