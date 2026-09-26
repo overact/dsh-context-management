@@ -1,0 +1,4 @@
+# dsh-context-management plugin registration
+- insert:
+    - id: context-management
+      name: '@local/dsh-context-management'

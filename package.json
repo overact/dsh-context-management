@@ -1,0 +1,64 @@
+{
+  "name": "@local/dsh-context-management",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Session-isolated checkpoint windowing for DSH with durable notes and bounded history recall",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./compaction": "./lib/compaction.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "scripts/sync-presets.mjs",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "cordis.patch.yml"
+  ],
+  "engines": {
+    "node": ">=22.15"
+  },
+  "scripts": {
+    "test": "node --experimental-test-isolation=none --test test/*.test.js",
+    "check": "node scripts/check.mjs",
+    "verify": "npm run check && npm run test"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-renderer"
+      ],
+      "platform": "web"
+    }
+  },
+  "license": "MIT",
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "context-management",
+    "windowing",
+    "history-notes",
+    "token-budget"
+  ],
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-compaction-basic": ">=0.1.7-alpha.1",
+    "@deepseek-ai/dsh-llm": ">=0.1.7-alpha.1",
+    "@deepseek-ai/dsh-atomic-write": ">=0.1.7-alpha.1",
+    "@deepseek-ai/dsh-home-paths": ">=0.1.7-alpha.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh": "0.1.7-rc.2"
+  }
+}
