@@ -3,6 +3,14 @@
   "version": "0.3.0",
   "private": true,
   "description": "Session-isolated checkpoint windowing for DSH with durable notes and bounded history recall",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/overact/dsh-context-management.git"
+  },
+  "homepage": "https://github.com/overact/dsh-context-management#readme",
+  "bugs": {
+    "url": "https://github.com/overact/dsh-context-management/issues"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
