@@ -5,7 +5,7 @@ import { SessionStateStore } from '../lib/session-state.js';
 import { WindowEngine } from '../lib/window-engine.js';
 import { NotesStore } from '../lib/notes-store.js';
 
-test('checkpoint preparation is bounded and side-effect free', () => {
+test('handoff preparation is bounded and side-effect free', () => {
   const s = Session.create('header'), states = new SessionStateStore();
   for (let i = 0; i < 8; i++) user(s, `User ${i}: ` + 'u'.repeat(10_000));
   s.append('goal/change', { goal: { phase: 'active', objective: 'g'.repeat(20_000) } });
@@ -25,7 +25,7 @@ test('checkpoint preparation is bounded and side-effect free', () => {
   }
 });
 
-test('generated handoffs are bounded, keep the session snapshot, and yield to checkpoints', () => {
+test('generated handoffs are bounded and keep the session snapshot', () => {
   const s = Session.create('generated'), states = new SessionStateStore();
   for (let i = 0; i < 4; i++) user(s, `User ${i}: ` + 'u'.repeat(2_000));
   s.append('todo/write', { todos: [{ content: 'Finish YAML', status: 'in_progress' }] });
@@ -40,13 +40,9 @@ test('generated handoffs are bounded, keep the session snapshot, and yield to ch
     assert.match(handoff.header, /\(p\/m\)/);
     assert.match(handoff.header, /Finish YAML/); assert.match(handoff.header, /User 3/);
   }
-  states.writeNote(s, 'checkpoint.md', 'Model-written state.');
-  const checkpoint = engine.prepare(s, 12000, generated);
-  assert.equal(checkpoint.record.summary_kind, 'checkpoint');
-  assert.doesNotMatch(checkpoint.header, /generated_handoff/);
 });
 
-test('note capacity checks apply to write and append without evicting checkpoints', () => {
+test('note capacity checks apply to write and append without evicting notes', () => {
   const notes = new NotesStore({ maxFiles: 2, maxTotalBytes: 10 });
   notes.appendToFile('self', 'a', 'abc'); notes.writeFile('self', 'b', 'def');
   assert.throws(() => notes.appendToFile('self', 'c', 'x'), /file limit/);

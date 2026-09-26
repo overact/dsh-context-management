@@ -27,25 +27,25 @@ test('real DSH manual transaction shrinks context, preserves corrections/notes a
   const agent = await f.agent(); const session = agent.session;
   const first = user(session, 'Implement CSV support.\n' + 'diagnostic data '.repeat(6000));
   user(session, 'Cancel CSV; implement YAML only.');
-  const write = await f.execute(agent, 'notes_write_file', { path: 'checkpoint.md', text: 'YAML parser is implemented; next run validation.' });
+  const write = await f.execute(agent, 'notes_write_file', { path: 'progress.md', text: 'YAML parser is implemented; next run validation.' });
   assert.equal(write.isError, false);
   const before = f.ctx.tokenMeter.measure(session).totalTokens;
   const rotation = await f.native.compactNow(agent, signal());
   assert.ok(rotation);
   assert.ok(f.ctx.tokenMeter.measure(session).totalTokens < before / 2);
-  assert.equal(f.legacyCalls, 0);
+  assert.equal(f.legacyCalls, 1);
   const visible = session.deriveMessages().map(m => JSON.stringify(m.content)).join('\n');
   assert.match(visible, /YAML only/);
   assert.match(visible, /next run validation/);
   assert.match(visible, /Later user instructions supersede earlier/);
   assert.equal(f.plugin.states.get(session).windows.at(-1).window_id, 'win_002');
-  assert.equal(f.plugin.states.get(session).windows[0].summary_kind, 'checkpoint');
+  assert.equal(f.plugin.states.get(session).windows[0].summary_kind, 'generated');
   const recorded = f.persisted.get(session.id);
   assert.ok(recorded.some(e => e.type === 'compaction/end'));
   const restored = Session.create(session.id, recorded);
   const recovered = new SessionStateStore(f.plugin.states.repository);
   assert.equal(recovered.get(restored).windows.at(-1).window_id, 'win_002');
-  assert.match(recovered.get(restored).notes.readFile('self', 'checkpoint.md').content, /YAML parser/);
+  assert.match(recovered.get(restored).notes.readFile('self', 'progress.md').content, /YAML parser/);
   assert.equal(new HistoryStore(restored, recovered).readItem({ item_id: `item_${first.seq}` }).total_chars, first.data.content[0].text.length);
 });
 
@@ -55,7 +55,7 @@ test('new_context waits for sibling tool results and rotates via the real pre-st
   user(s, 'Investigate the parser. ' + 'historical output '.repeat(4000));
   header(s); startTurn(s); assistantCalls(s, ['new_context', 'bash']);
   const before = [...s.surface.nodes];
-  const requested = await f.execute(agent, 'new_context', { notes_summary: 'Parser fix ready; test next.' });
+  const requested = await f.execute(agent, 'new_context', {});
   assert.equal(requested.isError, false);
   assert.equal(requested.value.status, 'context_window_requested');
   assert.deepEqual(s.surface.nodes, before);
@@ -67,16 +67,15 @@ test('new_context waits for sibling tool results and rotates via the real pre-st
   const { toolPairingBalancedAfter } = await dsh('dsh-compaction');
   assert.equal(toolPairingBalancedAfter(s, s.surface.nodes.at(-1)), true);
   assert.match(JSON.stringify(s.deriveMessages()), /Sibling command finished/);
-  assert.equal(f.legacyCalls, 0);
+  assert.equal(f.legacyCalls, 1);
 });
 
-test('pressure reminders occur once, and automatic rotation without a checkpoint uses one generated handoff', async t => {
+test('automatic rotation uses one generated handoff', async t => {
   const f = await fixture({ capacity: 20_000 }); t.after(f.dispose);
   const agent = await f.agent(); const s = agent.session;
   user(s, 'a'.repeat(58_000)); header(s); startTurn(s);
   const step = () => f.ctx.waterfall('agent/pre-step', { agent, signal: signal() }, () => ({ kind: 'enter' }));
   await step(); await step();
-  assert.equal(s.snapshotEvents().filter(e => e.data.source?.kind === 'plugin:context-management-reminder').length, 1);
   user(s, 'b'.repeat(16_000));
   await step();
   assert.equal(f.plugin.states.get(s).windows.at(-1).window_id, 'win_002');

@@ -8,16 +8,16 @@ test('history is isolated by live session, including explicit agent-name overrid
   const f = await fixture(); t.after(f.dispose);
   const a = await f.agent('a'), b = await f.agent('b');
   user(a.session, 'A private task'); user(b.session, 'B private task');
-  await f.execute(a, 'notes_write_file', { path: 'checkpoint.md', text: 'A state' });
-  await f.execute(b, 'notes_write_file', { path: 'checkpoint.md', text: 'B state' });
+  await f.execute(a, 'notes_write_file', { path: 'progress.md', text: 'A state' });
+  await f.execute(b, 'notes_write_file', { path: 'progress.md', text: 'B state' });
   const items = await f.execute(a, 'history_list_items');
   assert.equal(items.isError, false);
   assert.equal(items.value.items.length, 1);
   assert.match(items.value.items[0].truncated_content, /A private/);
   assert.equal((await f.execute(a, 'history_list_items', { agent_name: 'b' })).isError, true);
-  assert.equal((await f.execute(a, 'notes_read_file', { path: '/b/notes/checkpoint.md' })).isError, true);
-  assert.equal((await f.execute(a, 'notes_write_file', { path: '/b/notes/checkpoint.md', text: 'overwrite' })).isError, true);
-  assert.equal((await f.execute(b, 'notes_read_file', { path: 'checkpoint.md' })).value.content, 'B state');
+  assert.equal((await f.execute(a, 'notes_read_file', { path: '/b/notes/progress.md' })).isError, true);
+  assert.equal((await f.execute(a, 'notes_write_file', { path: '/b/notes/progress.md', text: 'overwrite' })).isError, true);
+  assert.equal((await f.execute(b, 'notes_read_file', { path: 'progress.md' })).value.content, 'B state');
 });
 
 test('event IDs remain stable through repeated rotations; older history is not evicted', async t => {

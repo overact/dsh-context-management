@@ -2,7 +2,7 @@
   "name": "@local/dsh-context-management",
   "version": "0.3.0",
   "private": true,
-  "description": "Session-isolated checkpoint windowing for DSH with durable notes and bounded history recall",
+  "description": "Windowed compaction for DeepSeek Harness (DSH) with session-private notes and paged history recall",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/overact/dsh-context-management.git"

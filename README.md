@@ -2,7 +2,7 @@
 
 **English** · [简体中文](./README.zh-CN.md)
 
-Checkpoint windowing, session-private notes and paged history recall for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). The multi-window idea is borrowed from Codex, but this is **not a 1:1 port of the Codex API, and it does not promise lossless recovery of every detail**.
+Windowed compaction, session-private notes and paged history recall for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). The multi-window idea is borrowed from Codex, but this is **not a 1:1 port of the Codex API, and it does not promise lossless recovery of every detail**.
 
 ## Compatibility
 
@@ -14,13 +14,13 @@ Version **0.3.0**, verified on **DSH 0.1.7-rc.2 / Node.js ≥ 22.15**. Peer rang
 - The host plugin publishes a `contextWindows` service (session state and settings); preset engines look it up per call rather than via `inject`. Without the host, the engine behaves exactly like the native one, so a preset never loses compaction because of a missing dependency.
 - `new_context` only works in presets that mount this engine; elsewhere it fails with a clear error while the notes/history tools stay usable.
 - The window number only advances once DSH actually commits the replacement messages. Failures, cancellations and "nothing to compact" never report a successful switch.
-- The handoff prefers a `checkpoint.md` written by the model in the current window. Without a fresh checkpoint, the default (`handoffSummary: generated`) calls the native summary model **once**, wraps the result in `<generated_handoff>`, and combines it with the goal, todos, recent user instructions and the window index. The `compaction/summary` event records the real provider/model/usage, so the cost shows up in usage accounting. If that call fails the handoff falls back to an extractive one without blocking the switch; `handoffSummary: extractive` never makes the extra call. Disabling the plugin or its tools falls back to native summaries.
+- Every window switch builds a bounded handoff. By default (`handoffSummary: generated`) the native summary model is called **once** on the outgoing region and its result is wrapped in `<generated_handoff>`, together with the goal, todos, recent user instructions, recent notes and the window index. The `compaction/summary` event records the real provider/model/usage, so the cost shows up in usage accounting. If that call fails the handoff falls back to an extractive one without blocking the switch; `handoffSummary: extractive` never makes the extra call. Disabling the plugin or its tools falls back to native summaries.
 
 ## Tools
 
 | Tool | Purpose |
 | --- | --- |
-| `new_context` | Request a window switch at the next safe step boundary (optionally with `notes_summary`) |
+| `new_context` | Request a window switch at the next safe step boundary |
 | `notes_write_file` / `notes_append_to_file` / `notes_read_file` / `notes_list_files_by_prefix` / `notes_search_contents` | Session-private notes that survive window switches and restarts |
 | `history_list_windows` / `history_list_items` / `history_read_item` / `history_search_contents` | Paged recall over the session's complete raw history |
 
@@ -28,7 +28,7 @@ Version **0.3.0**, verified on **DSH 0.1.7-rc.2 / Node.js ≥ 22.15**. Peer rang
 
 `/ctx` toggles the plugin; `/compact` runs the current compaction mode. The toggle applies to **every session of the running DSH instance**, not to a single chat tab.
 
-When the model calls `new_context` it gets back **requested**, not a reset: the optional `notes_summary` is saved first and the switch is scheduled for the next safe step boundary, after the current step's tool results are fully written to history. Explicit switch requests are honoured even when DSH's `auto` compaction is off.
+When the model calls `new_context` it gets back **requested**, not a reset: the switch is scheduled for the next safe step boundary, after the current step's tool results are fully written to history. Explicit switch requests are honoured even when DSH's `auto` compaction is off.
 
 The web "Context management" settings page uses DSH 0.1.7 `configForms` and shares its backend setting with `/ctx`. Read failures, read-only connections and failed saves are never shown as a successful toggle. Settings changes need no restart; **after upgrading the plugin code, reload the plugin or restart DSH, then refresh the page**.
 
@@ -51,7 +51,7 @@ Include `context-management/notes/` when backing up or migrating; **deleting a s
 
 | Operation | Default / hard limit |
 | --- | --- |
-| Window handoff (`checkpointMaxChars`) | 12,000 characters by default, configurable 4,000–16,000 |
+| Window handoff (`handoffMaxChars`) | 12,000 characters by default, configurable 4,000–16,000 |
 | Injected notes | Up to the 8 most recent, ~1,800 characters each, within the handoff budget |
 | Single note file | 1,000,000 UTF-8 bytes |
 | Notes per session | 64 files / 4,000,000 UTF-8 bytes; over-limit writes are rejected, never silently evicted |
@@ -63,9 +63,8 @@ Include `context-management/notes/` when backing up or migrating; **deleting a s
 
 History queries return `has_more` and `next_cursor`; keep the same filters and order when continuing. Body reads continue with `next_offset_chars`. Search is case-sensitive unless `case_sensitive: false`.
 
-Recent user instructions are kept in chronological order with their event addresses, later corrections taking precedence. The checkpoint also keeps the active goal, open todos and a bounded set of notes; exact raw evidence is recovered through the history tools.
+Recent user instructions are kept in chronological order with their event addresses, later corrections taking precedence. The handoff also keeps the active goal, open todos and a bounded set of recent notes; exact raw evidence is recovered through the history tools.
 
-The budget reminder is based on the native compaction threshold and fires at most once per window. The actual threshold, retained-tail size and provider overflow retry still come from DSH's configuration; the reminder is not an exact statement of remaining model capacity.
 
 ## Installation
 
@@ -110,7 +109,7 @@ This plugin is not published to npm; the `@local/` scope marks it as a local plu
 | --- | --- | --- |
 | DSH imports | fail | The target DSH packages really export the functions/classes the plugin imports |
 | Compaction hooks | fail | `BasicCompactionEngine`'s prototype has the methods the plugin overrides or calls (`summarize()`, `compactIfNeeded()`) |
-| Host services | fail | The packages providing `tools`, `sessions`, `commands`, `systemPrompt`, `settings`, `llm`, `tokenMeter` have the methods the plugin calls |
+| Host services | fail | The packages providing the services the plugin calls (`tools`, `sessions`, `commands`, `systemPrompt`, `settings`) have those methods |
 | Host events, session-log types | fail | DSH still emits the events and session event types the plugin listens for |
 | Web presets | fail | Some shipped preset mounts the native engine, so the windowing engine has a slot to take |
 | Notes storage | fail | The notes directory under `$DSH_HOME` is writable |
@@ -133,21 +132,19 @@ It exits with code 1 when any fail-level check fails. `sync-presets.mjs` runs it
         injectTools: true
         defaultStrategy: window      # or native: models not listed in modelPolicies use native summaries
         modelPolicies: []            # e.g. [{ provider: deepseek, model: deepseek-chat, strategy: native }]
-        reminderTokens: 6144         # 1024–32768
         handoffSummary: generated    # or extractive: no extra model call
-        checkpointMaxChars: 12000    # 4000–16000
+        handoffMaxChars: 12000       # 4000–16000
 ```
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `enabled` | `true` | Enable context management for every session of this DSH instance; this is what `/ctx` toggles |
-| `overrideCompaction` | `true` | Replace native summary generation with checkpoints plus history recall |
+| `overrideCompaction` | `true` | Replace native summaries with window handoffs (summary + goal/todo + recent instructions + notes + window index) plus history recall |
 | `injectTools` | `true` | Provide the notes/history/new_context tools; when off, native summary compaction is used |
 | `defaultStrategy` | `window` | Default compaction strategy; `native` makes unlisted models use native summaries |
 | `modelPolicies` | `[]` | Per exact provider/model strategy overrides; the first match wins |
-| `reminderTokens` | `6144` | Checkpoint-reminder budget reserved before the auto-compaction threshold |
-| `handoffSummary` | `generated` | Handoff mode when the model wrote no checkpoint |
-| `checkpointMaxChars` | `12000` | Maximum characters of the window handoff |
+| `handoffSummary` | `generated` | Body of the handoff: `generated` calls the native summary model once; `extractive` only excerpts records |
+| `handoffMaxChars` | `12000` | Maximum characters of the window handoff |
 
 `injectTools: false` removes the tools and uses native summaries, so history is never trimmed without a way to recover it. `overrideCompaction: false` keeps the notes/history tools while regular auto compaction and `/compact` use native summaries; the model can still request `new_context` explicitly.
 
@@ -186,7 +183,7 @@ History reads are incremental: building state for 10,000 synthetic events takes 
 | --- | --- |
 | `lib/index.js` | Host plugin: config schema, tool and command registration, `contextWindows` service, settings changes |
 | `lib/compaction.js` | Preset compaction engine, a `BasicCompactionEngine` subclass that falls back to native behaviour without the host |
-| `lib/window-controller.js` / `window-engine.js` / `window-policy.js` / `checkpoint-reminder.js` | When to switch windows, building the handoff, per-model strategy, budget reminder |
+| `lib/window-controller.js` / `window-engine.js` / `window-policy.js` | When to switch windows, building the handoff, per-model strategy |
 | `lib/session-state.js` | Incremental per-session state projection (windows, goal/todo, pending requests) |
 | `lib/history-store.js` / `lib/tools/history.js` | Paged session-log recall and the history tools |
 | `lib/notes-store.js` / `lib/note-repository.js` / `lib/tools/notes.js` | In-memory note model, locked atomic persistence, the notes tools |

@@ -15,8 +15,8 @@ test('real JSONL storage restores notes, windows and exact history through a fre
   try {
     const a = await f.agent('disk-session');
     user(a.session, 'Exact original output 中文\n' + 'x'.repeat(40_000)); user(a.session, 'Continue with YAML.');
-    assert.equal((await f.execute(a, 'notes_write_file', { path: 'checkpoint.md', text: '已完成实现\n' })).isError, false);
-    assert.equal((await f.execute(a, 'notes_append_to_file', { path: 'checkpoint.md', text: '待验证恢复。' })).isError, false);
+    assert.equal((await f.execute(a, 'notes_write_file', { path: 'progress.md', text: '已完成实现\n' })).isError, false);
+    assert.equal((await f.execute(a, 'notes_append_to_file', { path: 'progress.md', text: '待验证恢复。' })).isError, false);
     // Notes are plugin-owned Harness-home data, not files inside the persistence backend's layout.
     assert.ok(existsSync(join(root, 'context-management', 'notes', 'disk-session.json')));
     assert.ok(!readdirSync(root, { recursive: true }).some(p => String(p).endsWith('context-management-notes.json')));
@@ -38,7 +38,7 @@ test('real JSONL storage restores notes, windows and exact history through a fre
     const states = new SessionStateStore(new NoteRepository(() => join(root, 'context-management', 'notes'))); const state = states.get(s);
     assert.equal(state.windows.at(-1).window_id, 'win_002');
     assert.equal(state.pending, null);
-    assert.equal(state.notes.readFile('self', 'checkpoint.md').content, '已完成实现\n待验证恢复。');
+    assert.equal(state.notes.readFile('self', 'progress.md').content, '已完成实现\n待验证恢复。');
     assert.match(new HistoryStore(s, states).readItem({ item_id: 'item_0' }).content, /Exact original output 中文/);
   } finally {
     if (second) await second.fiber.dispose();
@@ -46,11 +46,11 @@ test('real JSONL storage restores notes, windows and exact history through a fre
   }
 });
 
-test('failed durability is reported rather than acknowledging a saved checkpoint', async t => {
+test('failed durability is reported rather than acknowledging a saved note', async t => {
   const f = await fixture(); t.after(f.dispose);
   const a = await f.agent();
   f.ctx.on('session/flush', () => { throw new Error('disk unavailable'); });
-  const write = await f.execute(a, 'notes_write_file', { path: 'checkpoint.md', text: 'state' });
+  const write = await f.execute(a, 'notes_write_file', { path: 'progress.md', text: 'state' });
   assert.equal(write.isError, true);
   assert.match(JSON.stringify(write), /disk unavailable/);
   assert.equal(f.plugin.states.get(a.session).windows.length, 1);
@@ -64,9 +64,9 @@ test('concurrent note writers serialize without lost appends', async t => {
   const left = new SessionStateStore(new NoteRepository(f.notesRoot));
   const right = new SessionStateStore(new NoteRepository(f.notesRoot));
   await Promise.all([
-    left.writeNote(a.session, 'checkpoint.md', 'LEFT\n', 'append'),
-    right.writeNote(a.session, 'checkpoint.md', 'RIGHT\n', 'append'),
+    left.writeNote(a.session, 'progress.md', 'LEFT\n', 'append'),
+    right.writeNote(a.session, 'progress.md', 'RIGHT\n', 'append'),
   ]);
-  const restored = new NoteRepository(f.notesRoot).load(a.session).readFile('self', 'checkpoint.md').content;
+  const restored = new NoteRepository(f.notesRoot).load(a.session).readFile('self', 'progress.md').content;
   assert.match(restored, /LEFT/); assert.match(restored, /RIGHT/);
 });

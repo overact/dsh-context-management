@@ -2,7 +2,7 @@
 
 [English](./README.md) · **简体中文**
 
-[DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 的 checkpoint 换窗、会话私有笔记和分页历史检索插件。借鉴 Codex 的多窗口思路，**不是 Codex API 的 1:1 移植，也不保证模型无损恢复全部语义**。
+[DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 的换窗压缩、会话私有笔记和分页历史检索插件。借鉴 Codex 的多窗口思路，**不是 Codex API 的 1:1 移植，也不保证模型无损恢复全部语义**。
 
 ## 当前适配
 
@@ -14,13 +14,13 @@
 - 宿主插件发布 `contextWindows` 服务（会话状态与设置）；preset 里的引擎按调用查找它而非 `inject`。宿主缺席时引擎行为与原生完全一致，preset 不会因依赖缺失而失去压缩。
 - 只有挂载了该引擎的 preset 才能用 `new_context`；其他 preset 调用会明确报错，notes/history 工具仍可用。
 - 只有 DSH 真正提交替换消息，窗口编号才推进。失败、取消和无可压缩历史不会假报换窗成功。
-- 换窗交接优先使用模型在本窗口写入的 `checkpoint.md`。没有新 checkpoint 时，默认（`handoffSummary: generated`）调用**一次**原生摘要模型，把摘要放进 `<generated_handoff>`，并与目标、待办、近期用户指令和窗口目录一起组成交接；`compaction/summary` 事件记录真实摘要模型的 provider/model/usage，费用统计可见。摘要调用失败时退回截取式交接，不阻塞换窗。`handoffSummary: extractive` 完全不额外调用模型。停用插件或工具时回退原生摘要生成。
+- 每次换窗都会生成一份有长度上限的交接。默认（`handoffSummary: generated`）对被换出的部分调用**一次**原生摘要模型，把摘要放进 `<generated_handoff>`，并与目标、待办、近期用户指令、近期笔记和窗口目录一起组成交接；`compaction/summary` 事件记录真实摘要模型的 provider/model/usage，费用统计可见。摘要调用失败时退回截取式交接，不阻塞换窗。`handoffSummary: extractive` 完全不额外调用模型。停用插件或工具时回退原生摘要生成。
 
 ## 工具
 
 | 工具 | 作用 |
 | --- | --- |
-| `new_context` | 请求在下一个安全 step 边界换窗（可附带 `notes_summary`） |
+| `new_context` | 请求在下一个安全 step 边界换窗 |
 | `notes_write_file` / `notes_append_to_file` / `notes_read_file` / `notes_list_files_by_prefix` / `notes_search_contents` | 会话私有笔记，跨换窗与重启保留 |
 | `history_list_windows` / `history_list_items` / `history_read_item` / `history_search_contents` | 分页检索本会话的完整原始历史 |
 
@@ -28,7 +28,7 @@
 
 `/ctx` 切换开关；`/compact` 执行当前压缩方式。开关作用于**当前 DSH 实例的所有会话**，不是某个聊天标签。
 
-模型调用 `new_context` 时，返回的是 **requested**，不是 reset：先保存可选的 `notes_summary`，再安排下一安全 step 边界换窗。本步工具结果会先完整写入历史。若 DSH 的 `auto` 关闭，插件仍处理显式换窗请求。
+模型调用 `new_context` 时，返回的是 **requested**，不是 reset：换窗安排在下一个安全 step 边界，本步工具结果会先完整写入历史。若 DSH 的 `auto` 关闭，插件仍处理显式换窗请求。
 
 网页“上下文管理”页使用 DSH 0.1.7 的 `configForms`，与 `/ctx` 共用后端设置。读取失败、只读连接和保存失败不会伪装成切换成功。设置修改无需重启；**升级插件代码后，运行中的 DSH 仍需要重载插件或重启，并刷新网页**。
 
@@ -51,7 +51,7 @@
 
 | 操作 | 默认值 / 硬上限 |
 | --- | --- |
-| 换窗交接（`checkpointMaxChars`） | 默认 12,000 字符，可设置 4,000–16,000 |
+| 换窗交接（`handoffMaxChars`） | 默认 12,000 字符，可设置 4,000–16,000 |
 | 注入笔记 | 最近最多 8 个，每个最多约 1,800 字符，仍受交接总预算限制 |
 | 单文件笔记 | 1,000,000 UTF-8 字节 |
 | 每会话笔记总量 | 64 个文件 / 4,000,000 UTF-8 字节；超限明确拒绝，不静默淘汰 |
@@ -63,9 +63,8 @@
 
 历史查询返回 `has_more` 和 `next_cursor`；继续查询时保持过滤条件与顺序。正文读取使用 `next_offset_chars`。搜索默认区分大小写，可设置 `case_sensitive: false`。
 
-上下文中的近期用户指令按时间顺序保留并标明事件地址，后续修正优先。checkpoint 同时保留活动 goal、未完成 todo 和有限笔记。具体原始证据通过历史工具恢复。
+上下文中的近期用户指令按时间顺序保留并标明事件地址，后续修正优先。交接同时保留活动 goal、未完成 todo 和有限的近期笔记。具体原始证据通过历史工具恢复。
 
-预算提醒以原生压缩阈值为基准，每窗口至多一次。实际压缩阈值、保留尾部大小和 provider overflow 重试仍使用 DSH 的配置；该提醒不是精确的模型剩余容量声明。
 
 ## 安装
 
@@ -110,7 +109,7 @@
 | --- | --- | --- |
 | DSH 导入 | 失败 | 目标 DSH 的包确实导出插件导入的函数/类 |
 | 压缩钩子 | 失败 | `BasicCompactionEngine` 原型上有插件重写/调用的方法（`summarize()`、`compactIfNeeded()`） |
-| 宿主服务 | 失败 | 提供 `tools`、`sessions`、`commands`、`systemPrompt`、`settings`、`llm`、`tokenMeter` 的包里存在插件调用的方法 |
+| 宿主服务 | 失败 | 提供插件所调用服务（`tools`、`sessions`、`commands`、`systemPrompt`、`settings`）的包里存在对应方法 |
 | 宿主事件、会话日志类型 | 失败 | DSH 仍会发出插件监听的事件和会话事件类型 |
 | Web preset | 失败 | 有自带 preset 挂载原生压缩引擎，换窗引擎才有位置可挂 |
 | 笔记存储 | 失败 | `$DSH_HOME` 下的笔记目录可写 |
@@ -133,21 +132,19 @@
         injectTools: true
         defaultStrategy: window      # 或 native：未在 modelPolicies 中列出的模型使用原生摘要
         modelPolicies: []            # 例：[{ provider: deepseek, model: deepseek-chat, strategy: native }]
-        reminderTokens: 6144         # 1024–32768
         handoffSummary: generated    # 或 extractive：无额外模型调用
-        checkpointMaxChars: 12000    # 4000–16000
+        handoffMaxChars: 12000       # 4000–16000
 ```
 
 | 键 | 默认值 | 含义 |
 | --- | --- | --- |
 | `enabled` | `true` | 启用上下文管理（当前 DSH 实例的所有会话）；`/ctx` 切换的就是它 |
-| `overrideCompaction` | `true` | 用 checkpoint 和历史检索替换原生摘要生成 |
+| `overrideCompaction` | `true` | 用换窗交接（摘要 + goal/todo + 近期指令 + 笔记 + 窗口目录）和历史检索替换原生摘要 |
 | `injectTools` | `true` | 启用 notes/history/new_context 工具；关闭时使用原生摘要压缩 |
 | `defaultStrategy` | `window` | 默认压缩策略；`native` 让未列出的模型使用原生摘要 |
 | `modelPolicies` | `[]` | 按精确 provider/model 覆盖策略，首个匹配项生效 |
-| `reminderTokens` | `6144` | 在自动压缩阈值前预留的 checkpoint 提醒预算 |
-| `handoffSummary` | `generated` | 模型未写 checkpoint 时的交接方式 |
-| `checkpointMaxChars` | `12000` | 换窗交接内容的最大字符数 |
+| `handoffSummary` | `generated` | 交接主体：`generated` 调用一次原生摘要模型；`extractive` 只截取记录 |
+| `handoffMaxChars` | `12000` | 换窗交接内容的最大字符数 |
 
 `injectTools: false` 会移除工具并使用原生摘要，避免裁剪之后无工具可恢复历史。`overrideCompaction: false` 保留 notes/history 工具，普通自动压缩和 `/compact` 使用原生摘要；模型仍可显式请求 `new_context`。
 
@@ -186,7 +183,7 @@ npm run verify
 | --- | --- |
 | `lib/index.js` | 宿主插件：配置 schema、工具与命令注册、`contextWindows` 服务、设置变更 |
 | `lib/compaction.js` | preset 中的压缩引擎，`BasicCompactionEngine` 子类，宿主缺席时退回原生行为 |
-| `lib/window-controller.js` / `window-engine.js` / `window-policy.js` / `checkpoint-reminder.js` | 换窗时机、交接内容构建、按模型选择策略、预算提醒 |
+| `lib/window-controller.js` / `window-engine.js` / `window-policy.js` | 换窗时机、交接内容构建、按模型选择策略 |
 | `lib/session-state.js` | 每个会话的增量状态投影（窗口、goal/todo、待处理请求） |
 | `lib/history-store.js` / `lib/tools/history.js` | 会话日志的分页检索与 history 工具 |
 | `lib/notes-store.js` / `lib/note-repository.js` / `lib/tools/notes.js` | 内存笔记模型、带锁的原子落盘、notes 工具 |
