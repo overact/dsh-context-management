@@ -26,7 +26,7 @@ Version **0.3.0**, verified on **DSH 0.1.7-rc.2 / Node.js ≥ 22.15**. Peer rang
 
 ## Usage
 
-`/ctx` (alias `/ctx-mw`) toggles the plugin; `/compact` runs the current compaction mode. The toggle applies to **every session of the running DSH instance**, not to a single chat tab.
+`/ctx` toggles the plugin; `/compact` runs the current compaction mode. The toggle applies to **every session of the running DSH instance**, not to a single chat tab.
 
 When the model calls `new_context` it gets back **requested**, not a reset: the optional `notes_summary` is saved first and the switch is scheduled for the next safe step boundary, after the current step's tool results are fully written to history. Explicit switch requests are honoured even when DSH's `auto` compaction is off.
 

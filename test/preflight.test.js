@@ -44,7 +44,7 @@ const failures = ({ results }) => results.filter(r => !r.ok && r.level === 'fail
 
 test('requirements are derived from the plugin sources', () => {
   const req = requirements();
-  assert.deepEqual(req.commands, ['ctx', 'ctx-mw']);
+  assert.deepEqual(req.commands, ['ctx']);
   assert.equal(req.tools.length, 10);
   assert.ok(req.hooks.includes('summarize') && req.hooks.includes('compactIfNeeded'));
   assert.ok(req.services.tools.includes('register'));
