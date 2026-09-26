@@ -43,6 +43,8 @@
 
 笔记按会话隔离，默认路径为 `self/notes/<path>`，**不开放任意跨会话读写**。文件位于插件自有目录 `$DSH_HOME/context-management/notes/<sessionId>.json`（`$DSH_HOME` 由 `dsh-home-paths` 解析），不依赖会话持久化后端的私有布局；使用 DSH 原子写入与跨进程文件锁。失败不会把未保存状态替换进缓存。
 
+每次换窗提交后（自动、`/compact` 或 `new_context`），插件会自己写两份笔记：`handoff.md` 整份替换为最新一次的完整交接，不截断（生成式交接取摘要模型的原始输出）；`handoff-log.md` 追加一行，记录窗口、时间、摘要条目和首行内容。完整内容只保留最新一份，因为每次生成的摘要都已合并了上一份；更早的交接仍可用 `history_read_item` 读取。这两份笔记不会再注入下一次交接，因为交接正文里已经有相同内容。压缩被取消或失败时不写；笔记写入失败只记日志，不阻塞换窗。
+
 笔记按需加载，不在启动时读取全部会话。恢复后重建窗口元数据并加载该会话笔记；未完成的临时换窗请求不会因重启而重新执行。
 
 备份或迁移时需同时包含 `context-management/notes/`；**删除会话不会自动删除其笔记文件**。分叉会话的笔记独立，父会话笔记不会隐式共享。
@@ -51,7 +53,7 @@
 
 | 操作 | 默认值 / 硬上限 |
 | --- | --- |
-| 换窗交接（`handoffMaxChars`） | 默认 12,000 字符，可设置 4,000–16,000 |
+| 换窗交接（`handoffMaxChars`） | 默认 16,000 字符，可设置 8,000–32,000 |
 | 注入笔记 | 最近最多 8 个，每个最多约 1,800 字符，仍受交接总预算限制 |
 | 单文件笔记 | 1,000,000 UTF-8 字节 |
 | 每会话笔记总量 | 64 个文件 / 4,000,000 UTF-8 字节；超限明确拒绝，不静默淘汰 |
@@ -63,7 +65,7 @@
 
 历史查询返回 `has_more` 和 `next_cursor`；继续查询时保持过滤条件与顺序。正文读取使用 `next_offset_chars`。搜索默认区分大小写，可设置 `case_sensitive: false`。
 
-上下文中的近期用户指令按时间顺序保留并标明事件地址，后续修正优先。交接同时保留活动 goal、未完成 todo 和有限的近期笔记。具体原始证据通过历史工具恢复。
+交接按时间顺序引用最近四条用户指令，每条最多 1,000 字符，并标明事件地址，后续修正优先。交接同时保留活动 goal、未完成 todo 和有限的近期笔记。具体原始证据通过历史工具恢复。
 
 
 ## 安装
@@ -133,7 +135,7 @@
         defaultStrategy: window      # 或 native：未在 modelPolicies 中列出的模型使用原生摘要
         modelPolicies: []            # 例：[{ provider: deepseek, model: deepseek-chat, strategy: native }]
         handoffSummary: generated    # 或 extractive：无额外模型调用
-        handoffMaxChars: 12000       # 4000–16000
+        handoffMaxChars: 16000       # 8000–32000
 ```
 
 | 键 | 默认值 | 含义 |
@@ -144,7 +146,7 @@
 | `defaultStrategy` | `window` | 默认压缩策略；`native` 让未列出的模型使用原生摘要 |
 | `modelPolicies` | `[]` | 按精确 provider/model 覆盖策略，首个匹配项生效 |
 | `handoffSummary` | `generated` | 交接主体：`generated` 调用一次原生摘要模型；`extractive` 只截取记录 |
-| `handoffMaxChars` | `12000` | 换窗交接内容的最大字符数 |
+| `handoffMaxChars` | `16000` | 换窗交接内容的最大字符数 |
 
 `injectTools: false` 会移除工具并使用原生摘要，避免裁剪之后无工具可恢复历史。`overrideCompaction: false` 保留 notes/history 工具，普通自动压缩和 `/compact` 使用原生摘要；模型仍可显式请求 `new_context`。
 
@@ -175,7 +177,7 @@ npm run verify
 
 历史读取是增量的：10,000 条合成事件的首次状态构建约 2.5 ms，未变化时重复读取扫描 **0 条事件**（绝对时间仅供参考；回归测试约束的是增量读取、扫描上限和输出上限）。
 
-0.3.0 在 DSH 0.1.7-rc.2 上通过 62 项测试（含安装前检查：用只缺少某个钩子的替身 DSH 验证它只报告该项功能）。
+0.3.0 在 DSH 0.1.7-rc.2 上通过 64 项测试（含安装前检查：用只缺少某个钩子的替身 DSH 验证它只报告该项功能）。
 
 ## 代码结构
 
@@ -184,6 +186,7 @@ npm run verify
 | `lib/index.js` | 宿主插件：配置 schema、工具与命令注册、`contextWindows` 服务、设置变更 |
 | `lib/compaction.js` | preset 中的压缩引擎，`BasicCompactionEngine` 子类，宿主缺席时退回原生行为 |
 | `lib/window-controller.js` / `window-engine.js` / `window-policy.js` | 换窗时机、交接内容构建、按模型选择策略 |
+| `lib/handoff-note.js` | 每次换窗提交后写 `handoff.md` 和 `handoff-log.md` |
 | `lib/session-state.js` | 每个会话的增量状态投影（窗口、goal/todo、待处理请求） |
 | `lib/history-store.js` / `lib/tools/history.js` | 会话日志的分页检索与 history 工具 |
 | `lib/notes-store.js` / `lib/note-repository.js` / `lib/tools/notes.js` | 内存笔记模型、带锁的原子落盘、notes 工具 |

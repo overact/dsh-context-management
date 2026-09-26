@@ -43,6 +43,8 @@ History is read straight from the caller's own immutable DSH session log:
 
 Notes are isolated per session under `self/notes/<path>`; **there is no arbitrary cross-session read/write**. They live in the plugin's own directory, `$DSH_HOME/context-management/notes/<sessionId>.json` (`$DSH_HOME` resolved by `dsh-home-paths`), independent of the session-persistence backend's private layout, and are written with DSH's atomic write and cross-process file lock. A failed write never swaps unsaved state into the cache.
 
+After every committed window switch (automatic, `/compact` or `new_context`) the plugin writes two notes itself: `handoff.md` is replaced with the latest full, unclipped handoff (for a generated handoff, the summarizer's raw output), and `handoff-log.md` gains one line with the window, time, summary item and first line. Only the latest handoff is kept in full, because each generated summary already merges the previous one; earlier handoffs stay readable through `history_read_item`. Neither note is injected into the next handoff, whose body already carries the same text. A cancelled or failed compaction writes nothing, and a failed note write is logged without blocking the switch.
+
 Notes load on demand, not for every session at startup. On restore, window metadata is rebuilt and that session's notes are loaded; an unfinished transient switch request is not re-executed after a restart.
 
 Include `context-management/notes/` when backing up or migrating; **deleting a session does not delete its notes file**. Forked sessions get independent notes; parent notes are not implicitly shared.
@@ -51,7 +53,7 @@ Include `context-management/notes/` when backing up or migrating; **deleting a s
 
 | Operation | Default / hard limit |
 | --- | --- |
-| Window handoff (`handoffMaxChars`) | 12,000 characters by default, configurable 4,000–16,000 |
+| Window handoff (`handoffMaxChars`) | 16,000 characters by default, configurable 8,000–32,000 |
 | Injected notes | Up to the 8 most recent, ~1,800 characters each, within the handoff budget |
 | Single note file | 1,000,000 UTF-8 bytes |
 | Notes per session | 64 files / 4,000,000 UTF-8 bytes; over-limit writes are rejected, never silently evicted |
@@ -63,7 +65,7 @@ Include `context-management/notes/` when backing up or migrating; **deleting a s
 
 History queries return `has_more` and `next_cursor`; keep the same filters and order when continuing. Body reads continue with `next_offset_chars`. Search is case-sensitive unless `case_sensitive: false`.
 
-Recent user instructions are kept in chronological order with their event addresses, later corrections taking precedence. The handoff also keeps the active goal, open todos and a bounded set of recent notes; exact raw evidence is recovered through the history tools.
+The last four user instructions are quoted in chronological order, up to 1,000 characters each, with their event addresses, later corrections taking precedence. The handoff also keeps the active goal, open todos and a bounded set of recent notes; exact raw evidence is recovered through the history tools.
 
 
 ## Installation
@@ -133,7 +135,7 @@ It exits with code 1 when any fail-level check fails. `sync-presets.mjs` runs it
         defaultStrategy: window      # or native: models not listed in modelPolicies use native summaries
         modelPolicies: []            # e.g. [{ provider: deepseek, model: deepseek-chat, strategy: native }]
         handoffSummary: generated    # or extractive: no extra model call
-        handoffMaxChars: 12000       # 4000–16000
+        handoffMaxChars: 16000       # 8000–32000
 ```
 
 | Key | Default | Meaning |
@@ -144,7 +146,7 @@ It exits with code 1 when any fail-level check fails. `sync-presets.mjs` runs it
 | `defaultStrategy` | `window` | Default compaction strategy; `native` makes unlisted models use native summaries |
 | `modelPolicies` | `[]` | Per exact provider/model strategy overrides; the first match wins |
 | `handoffSummary` | `generated` | Body of the handoff: `generated` calls the native summary model once; `extractive` only excerpts records |
-| `handoffMaxChars` | `12000` | Maximum characters of the window handoff |
+| `handoffMaxChars` | `16000` | Maximum characters of the window handoff |
 
 `injectTools: false` removes the tools and uses native summaries, so history is never trimmed without a way to recover it. `overrideCompaction: false` keeps the notes/history tools while regular auto compaction and `/compact` use native summaries; the model can still request `new_context` explicitly.
 
@@ -175,7 +177,7 @@ Coverage includes the real Cordis lifecycle, DSH ToolRuntime, SettingsProvider, 
 
 History reads are incremental: building state for 10,000 synthetic events takes ~2.5 ms the first time, and an unchanged re-read scans **0 events** (timings are indicative only; the regression tests pin incremental reads, scan limits and output limits).
 
-0.3.0 passes 62 tests on DSH 0.1.7-rc.2, including the preflight: a stand-in DSH missing one hook must make it report exactly that capability.
+0.3.0 passes 64 tests on DSH 0.1.7-rc.2, including the preflight: a stand-in DSH missing one hook must make it report exactly that capability.
 
 ## Code layout
 
@@ -184,6 +186,7 @@ History reads are incremental: building state for 10,000 synthetic events takes 
 | `lib/index.js` | Host plugin: config schema, tool and command registration, `contextWindows` service, settings changes |
 | `lib/compaction.js` | Preset compaction engine, a `BasicCompactionEngine` subclass that falls back to native behaviour without the host |
 | `lib/window-controller.js` / `window-engine.js` / `window-policy.js` | When to switch windows, building the handoff, per-model strategy |
+| `lib/handoff-note.js` | Writing `handoff.md` and `handoff-log.md` after each committed switch |
 | `lib/session-state.js` | Incremental per-session state projection (windows, goal/todo, pending requests) |
 | `lib/history-store.js` / `lib/tools/history.js` | Paged session-log recall and the history tools |
 | `lib/notes-store.js` / `lib/note-repository.js` / `lib/tools/notes.js` | In-memory note model, locked atomic persistence, the notes tools |

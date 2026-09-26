@@ -61,7 +61,8 @@ export async function fixture(options = {}) {
   // Stand-in for the base LLM summarizer; tests never call a paid model.
   if (native) native.nativeSummarize = async () => {
     legacyCalls++;
-    return { summary: [{ type: 'text', text: 'Fixture legacy summary.' }], provider: 'fixture', model: 'fixture' };
+    const summary = [{ type: 'text', text: 'Fixture legacy summary.' }];
+    return { summary, rawOutput: summary, provider: 'fixture', model: 'fixture' };
   };
   let plugin;
   const module = await import('../../lib/index.js');

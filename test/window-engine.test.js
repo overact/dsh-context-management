@@ -12,7 +12,7 @@ test('handoff preparation is bounded and side-effect free', () => {
   s.append('todo/write', { todos: [{ content: 't'.repeat(20_000), status: 'in_progress' }] });
   for (let i = 0; i < 4; i++) states.writeNote(s, `n${i}`, 'n'.repeat(900_000));
   const seq = s.seq;
-  for (const budget of [4000, 8000, 16000]) {
+  for (const budget of [8000, 16000, 32000]) {
     const header = new WindowEngine(states).prepare(s, budget);
     assert.ok(header.header.length <= budget, `${header.header.length} > ${budget}`);
     assert.match(header.header, /User 7/);
@@ -31,14 +31,16 @@ test('generated handoffs are bounded and keep the session snapshot', () => {
   s.append('todo/write', { todos: [{ content: 'Finish YAML', status: 'in_progress' }] });
   const generated = { text: '## Primary Request\n' + 'g'.repeat(50_000), provider: 'p', model: 'm' };
   const engine = new WindowEngine(states);
-  assert.equal(engine.prepare(s, 4000, generated).record.summary_kind, 'extractive');
-  for (const budget of [12000, 16000]) {
+  assert.equal(engine.prepare(s, 7000, generated).record.summary_kind, 'extractive');
+  for (const budget of [12000, 16000, 32000]) {
     const handoff = engine.prepare(s, budget, generated);
     assert.equal(handoff.record.summary_kind, 'generated');
     assert.ok(handoff.header.length <= budget, `${handoff.header.length} > ${budget}`);
     assert.match(handoff.header, /<generated_handoff>\n## Primary Request/);
     assert.match(handoff.header, /\(p\/m\)/);
     assert.match(handoff.header, /Finish YAML/); assert.match(handoff.header, /User 3/);
+    // Recent instructions are quoted up to 1,000 characters each, not a 200-character topic.
+    assert.match(handoff.header, /\[item_\d+\] User 3: u{970}/);
   }
 });
 
