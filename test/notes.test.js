@@ -28,7 +28,7 @@ describe('NotesStore — Write and Read Operations', () => {
     assert.equal(read.total_lines, 4);
     assert.equal(read.start_line, 1);
     assert.equal(read.stop_line, 4);
-    assert.equal(String(read), '# Todo\n- Task 1\n- Task 2\n- Task 3');
+    assert.equal(read.content, '# Todo\n- Task 1\n- Task 2\n- Task 3');
   });
 
   it('overwriting an existing file updates content and updated_at while preserving created_at', async () => {

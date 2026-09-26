@@ -186,7 +186,7 @@ History reads are incremental: building state for 10,000 synthetic events takes 
 | --- | --- |
 | `lib/index.js` | Host plugin: config schema, tool and command registration, `contextWindows` service, settings changes |
 | `lib/compaction.js` | Preset compaction engine, a `BasicCompactionEngine` subclass that falls back to native behaviour without the host |
-| `lib/window-controller.js` / `window-engine.js` / `window-policy.js` / `token-budget-guard.js` | When to switch windows, building the handoff, per-model strategy, budget reminder |
+| `lib/window-controller.js` / `window-engine.js` / `window-policy.js` / `checkpoint-reminder.js` | When to switch windows, building the handoff, per-model strategy, budget reminder |
 | `lib/session-state.js` | Incremental per-session state projection (windows, goal/todo, pending requests) |
 | `lib/history-store.js` / `lib/tools/history.js` | Paged session-log recall and the history tools |
 | `lib/notes-store.js` / `lib/note-repository.js` / `lib/tools/notes.js` | In-memory note model, locked atomic persistence, the notes tools |

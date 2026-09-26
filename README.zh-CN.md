@@ -186,7 +186,7 @@ npm run verify
 | --- | --- |
 | `lib/index.js` | 宿主插件：配置 schema、工具与命令注册、`contextWindows` 服务、设置变更 |
 | `lib/compaction.js` | preset 中的压缩引擎，`BasicCompactionEngine` 子类，宿主缺席时退回原生行为 |
-| `lib/window-controller.js` / `window-engine.js` / `window-policy.js` / `token-budget-guard.js` | 换窗时机、交接内容构建、按模型选择策略、预算提醒 |
+| `lib/window-controller.js` / `window-engine.js` / `window-policy.js` / `checkpoint-reminder.js` | 换窗时机、交接内容构建、按模型选择策略、预算提醒 |
 | `lib/session-state.js` | 每个会话的增量状态投影（窗口、goal/todo、待处理请求） |
 | `lib/history-store.js` / `lib/tools/history.js` | 会话日志的分页检索与 history 工具 |
 | `lib/notes-store.js` / `lib/note-repository.js` / `lib/tools/notes.js` | 内存笔记模型、带锁的原子落盘、notes 工具 |
