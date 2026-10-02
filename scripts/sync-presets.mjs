@@ -8,8 +8,18 @@
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveDshDir, profileDir, fromDsh, parseArgs } from './dsh-env.mjs';
-import { NATIVE, WINDOWED, BEGIN, END, shippedOverrides, splitBlock, foreignOverrides } from './presets.mjs';
+import { NATIVE, WINDOWED, BEGIN, END, shippedOverrides, splitBlock, foreignOverrides, sameYaml } from './presets.mjs';
 import { runPreflight, report } from './preflight.mjs';
+
+/** The `yaml` module as the DSH install sees it, or null (then --check compares bytes). */
+async function loadYaml(dshDir) {
+  try {
+    const mod = await fromDsh(dshDir).import('yaml');
+    return mod.parseDocument ? mod : mod.default;
+  } catch {
+    return null;
+  }
+}
 
 async function main() {
   const args = parseArgs(process.argv.slice(2), ['--check', '--remove']);
@@ -40,7 +50,9 @@ async function main() {
     // Profile-authored presets (for example router-spec) are swapped in place.
     next = before.replaceAll(NATIVE, WINDOWED) + (before.endsWith('\n\n') ? '' : '\n') + generated + after.replaceAll(NATIVE, WINDOWED);
     if (args.check) {
-      if (next !== current) {
+      // Compare meaning, not bytes: DSH re-folds long lines when it rewrites the patch.
+      const YAML = await loadYaml(dshDir);
+      if (!sameYaml(YAML, next, current)) {
         console.error(`context-management: preset overrides in ${patchFile} are stale for dsh-web-app@${version}; run scripts/sync-presets.mjs`);
         process.exit(1);
       }

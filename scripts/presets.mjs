@@ -7,6 +7,7 @@
 // swapped.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
 export const NATIVE = "name: '@deepseek-ai/dsh-compaction-basic'";
 export const WINDOWED = "name: '@local/dsh-context-management/compaction'";
@@ -50,6 +51,31 @@ export function splitBlock(text) {
   if (end < 0) throw new Error('Generated block has a begin marker but no end marker.');
   const tail = text.indexOf('\n', end);
   return { before: text.slice(0, start), block: text.slice(start, tail < 0 ? text.length : tail + 1), after: tail < 0 ? '' : text.slice(tail + 1) };
+}
+
+// DSH's plugin manager rewrites the profile patch with the `yaml` package, which
+// folds long `!!js` scalars over several lines whenever a plugin is toggled. That
+// changes the bytes but not the meaning, so freshness is judged on the parsed
+// documents. A class instance keeps the `!!js` tag part of the value, so it still
+// differs from the same text as a plain string.
+class JsScalar { constructor(code) { this.code = code; } }
+const JS_TAG = { tag: 'tag:yaml.org,2002:js', resolve: code => new JsScalar(code) };
+
+function parseYaml(YAML, text) {
+  const doc = YAML.parseDocument(text, { customTags: [JS_TAG], logLevel: 'silent' });
+  if (doc.errors.length) throw doc.errors[0];
+  return doc.toJS();
+}
+
+/**
+ * Whether two patch texts say the same thing; layout and comments don't count.
+ * `YAML` is the `yaml` module of the DSH install. Without it, or when either text
+ * fails to parse, only byte-identical texts match (stale is the safe answer).
+ */
+export function sameYaml(YAML, a, b) {
+  if (a === b) return true;
+  try { return isDeepStrictEqual(parseYaml(YAML, a), parseYaml(YAML, b)); }
+  catch { return false; }
 }
 
 /** Ids of shipped presets that the profile already overrides outside the generated block. */

@@ -178,7 +178,7 @@ The web host provides no global `compaction`; compaction engines live in each pr
 
 ```bash
 node scripts/sync-presets.mjs            # generate/refresh (saves cordis.patch.yml.pre-sync first)
-node scripts/sync-presets.mjs --check    # exit code 1 when the block is stale for the installed DSH
+node scripts/sync-presets.mjs --check    # exit code 1 when the block is stale for the installed DSH (compares parsed YAML, so lines DSH re-folds don't count)
 node scripts/sync-presets.mjs --remove   # delete the block and restore native rows (full rollback)
 ```
 

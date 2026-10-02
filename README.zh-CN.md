@@ -178,7 +178,7 @@ Web 宿主不提供全局 `compaction`，压缩引擎位于各 preset 的隔离�
 
 ```bash
 node scripts/sync-presets.mjs            # 生成/刷新（写入前保存 cordis.patch.yml.pre-sync）
-node scripts/sync-presets.mjs --check    # 生成块与已安装 DSH 不一致时退出码 1
+node scripts/sync-presets.mjs --check    # 生成块与已安装 DSH 不一致时退出码 1（按解析后的 YAML 比较，DSH 重新折行不算不一致）
 node scripts/sync-presets.mjs --remove   # 删除生成块并恢复原生行，完全回滚
 ```
 
