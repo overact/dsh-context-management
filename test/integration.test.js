@@ -112,6 +112,58 @@ test('extractive handoff mode never calls the auxiliary summarizer', async t => 
   assert.equal(s.snapshotEvents().find(e => e.type === 'compaction/summary').data.provider, 'context-management');
 });
 
+test('a recoverable summarizer failure reaches host recovery instead of degrading locally', async t => {
+  const f = await fixture(); t.after(f.dispose);
+  const agent = await f.agent(); const s = agent.session;
+  user(s, 'Old work. ' + 'noise '.repeat(8000)); user(s, 'Latest instruction.');
+  let recovered = 0, calls = 0;
+  // Stands in for a host recovery handler such as image offload.
+  f.ctx.on('compaction/summary-error', ({ error }, next) => {
+    if (error?.code !== llm.IMAGE_OFFLOAD_REQUIRED_CODE) return next();
+    recovered++; return true;
+  });
+  f.native.nativeSummarize = async () => {
+    if (++calls === 1) throw new llm.LlmError('images must be offloaded', llm.IMAGE_OFFLOAD_REQUIRED_CODE);
+    const body = [{ type: 'text', text: '## Recovered handoff\n' + 'r'.repeat(2_000) }];
+    return { summary: body, rawOutput: body, provider: 'fixture', model: 'recovered' };
+  };
+  assert.ok(await f.native.compactNow(agent, signal()));
+  assert.equal(recovered, 1, 'the host recovery handler must see the failure');
+  assert.equal(calls, 2, 'recovery must retry the summarizer rather than degrade');
+  const event = s.snapshotEvents().find(e => e.type === 'compaction/summary');
+  assert.equal(event.data.model, 'recovered');
+  assert.match(event.data.summary[0].text, /## Recovered handoff/);
+  assert.match(event.data.summary[0].text, /\n<\/generated_handoff>/);
+});
+
+test('a successful summarizer call keeps its envelope when the handoff body does not fit', async t => {
+  const f = await fixture({ config: { handoffMaxChars: 8000 } }); t.after(f.dispose);
+  const agent = await f.agent(); const s = agent.session;
+  s.append('goal/change', { goal: { phase: 'active', objective: 'g'.repeat(20_000) } });
+  s.append('todo/write', { todos: [{ content: 't'.repeat(20_000), status: 'in_progress' }] });
+  for (let i = 0; i < 4; i++) user(s, `Instruction ${i}: ` + 'u'.repeat(20_000));
+  f.native.nativeSummarize = async () => {
+    const summary = [{ type: 'text', text: '## Generated but dropped\n' + 'g'.repeat(20_000) }];
+    return { summary, rawOutput: summary, provider: 'fixture-provider', model: 'fixture-summarizer',
+      maxTokens: 1234, llmStreamCall: true, usage: { inputTokens: 10, outputTokens: 20 } };
+  };
+  assert.ok(await f.native.compactNow(agent, signal()));
+  const text = s.snapshotEvents().find(e => e.type === 'compaction/summary').data.summary[0].text;
+  const event = s.snapshotEvents().find(e => e.type === 'compaction/summary').data;
+  const record = JSON.parse(/<window_record>(.*?)<\/window_record>/.exec(text)[1]);
+  assert.equal(record.summary_kind, 'extractive', 'a body that does not fit stays extractive');
+  assert.equal(record.generated_discarded, 'budget', 'the budget fallback must be explicit in the record');
+  assert.doesNotMatch(text, /<generated_handoff>/);
+  assert.ok(text.length <= 8000, `${text.length} > 8000`);
+  // The auxiliary call really ran: its envelope must survive for cost accounting.
+  assert.equal(event.provider, 'fixture-provider');
+  assert.equal(event.model, 'fixture-summarizer');
+  assert.equal(event.maxTokens, 1234);
+  assert.equal(event.llmStreamCall, true);
+  assert.deepEqual(event.usage, { inputTokens: 10, outputTokens: 20 });
+  assert.equal(f.plugin.states.get(s).windows[0].summary_kind, 'extractive');
+});
+
 test('manual cancellation, busy admission and unbalanced cuts do not advance a window', async t => {
   const f = await fixture(); t.after(f.dispose);
   const agent = await f.agent(); const s = agent.session;

@@ -6,7 +6,7 @@ Windowed compaction, session-private notes and paged history recall for [DeepSee
 
 ## Compatibility
 
-Version **0.3.0**, verified on **DSH 0.1.7-rc.2 / Node.js ≥ 22.15**. Peer ranges are `>=0.1.7-alpha.1` with no upper bound: since 0.1.7-rc.1, DSH skips at startup any plugin whose peer range excludes the running version, so an upper bound would silently disable the plugin after a DSH upgrade. Compatibility is judged by capability instead, through the [preflight check](#preflight-check).
+Version **0.3.1**, verified on **DSH 0.2.0-rc.2 / Node.js ≥ 22.15**. Peer ranges are `>=0.1.7-alpha.1` with no upper bound: since 0.1.7-rc.1, DSH skips at startup any plugin whose peer range excludes the running version, so an upper bound would silently disable the plugin after a DSH upgrade. Compatibility is judged by capability instead, through the [preflight check](#preflight-check).
 
 - Works through official DSH extension points: `@local/dsh-context-management/compaction` subclasses `BasicCompactionEngine` and overrides the `summarize()` hook and the dynamically dispatched `compactIfNeeded()`. No instance monkey-patching, no reads of Cordis internals.
 - Reuses the native tool-call pairing checks, recent-turn retention, maintenance lock, cancellation, shrink check, compaction transaction, persistence and overflow retry.
@@ -14,7 +14,7 @@ Version **0.3.0**, verified on **DSH 0.1.7-rc.2 / Node.js ≥ 22.15**. Peer rang
 - The host plugin publishes a `contextWindows` service (session state and settings); preset engines look it up per call rather than via `inject`. Without the host, the engine behaves exactly like the native one, so a preset never loses compaction because of a missing dependency.
 - `new_context` only works in presets that mount this engine; elsewhere it fails with a clear error while the notes/history tools stay usable.
 - The window number only advances once DSH actually commits the replacement messages. Failures, cancellations and "nothing to compact" never report a successful switch.
-- Every window switch builds a bounded handoff. By default (`handoffSummary: generated`) the native summary model is called **once** on the outgoing region and its result is wrapped in `<generated_handoff>`, together with the goal, todos, recent user instructions, recent notes and the window index. The `compaction/summary` event records the real provider/model/usage, so the cost shows up in usage accounting. If that call fails the handoff falls back to an extractive one without blocking the switch; `handoffSummary: extractive` never makes the extra call. Disabling the plugin or its tools falls back to native summaries.
+- Every window switch builds a bounded handoff. By default (`handoffSummary: generated`) the native summary model is called **once** on the outgoing region and its result is wrapped in `<generated_handoff>`, together with the goal, todos, recent user instructions, recent notes and the window index. The mandatory snapshot is rendered first and the body takes every character left over, so an unused snapshot allowance returns to the body instead of being stranded; optional note previews are bounded so they cannot consume it. The `compaction/summary` event records the real provider/model/usage even when the body ends up extractive, so the cost shows up in usage accounting. If that call fails, or the remaining budget cannot carry a usable body, the handoff falls back to an extractive one without blocking the switch, and its window record states why (`generated_discarded: budget`); `handoffSummary: extractive` never makes the extra call. Disabling the plugin or its tools falls back to native summaries.
 
 ## How it works
 
@@ -42,7 +42,7 @@ All four entry points end in the same switch. If the summary call fails, the han
 | --- | --- |
 | `new_context` | Request a window switch at the next safe step boundary |
 | `notes_write_file` / `notes_append_to_file` / `notes_read_file` / `notes_list_files_by_prefix` / `notes_search_contents` | Session-private notes that survive window switches and restarts |
-| `history_list_windows` / `history_list_items` / `history_read_item` / `history_search_contents` | Paged recall over the session's complete raw history |
+| `history_list_windows` / `history_list_items` / `history_read_item` / `history_search_contents` | Paged recall over the session's complete raw history. `history_read_item` also resolves the window-summary, goal and checklist item IDs that every handoff prints |
 
 ## Usage
 
@@ -50,7 +50,7 @@ All four entry points end in the same switch. If the summary call fails, the han
 
 When the model calls `new_context` it gets back **requested**, not a reset: the switch is scheduled for the next safe step boundary, after the current step's tool results are fully written to history. Explicit switch requests are honoured even when DSH's `auto` compaction is off.
 
-The web "Context management" settings page uses DSH 0.1.7 `configForms` and shares its backend setting with `/ctx`. Read failures, read-only connections and failed saves are never shown as a successful toggle. Settings changes need no restart; **after upgrading the plugin code, reload the plugin or restart DSH, then refresh the page**.
+The web "Context management" settings page uses DSH 0.2.0 `configForms` and shares its backend setting with `/ctx`. Read failures, read-only connections and failed saves are never shown as a successful toggle. Settings changes need no restart; **after upgrading the plugin code, reload the plugin or restart DSH, then refresh the page**.
 
 ## Storage and recovery
 
@@ -197,7 +197,7 @@ Coverage includes the real Cordis lifecycle, DSH ToolRuntime, SettingsProvider, 
 
 History reads are incremental: building state for 10,000 synthetic events takes ~2.5 ms the first time, and an unchanged re-read scans **0 events** (timings are indicative only; the regression tests pin incremental reads, scan limits and output limits).
 
-0.3.0 passes 64 tests on DSH 0.1.7-rc.2, including the preflight: a stand-in DSH missing one hook must make it report exactly that capability.
+0.3.1 passes 73 tests on DSH 0.2.0-rc.2, including the preflight: a stand-in DSH missing one hook must make it report exactly that capability.
 
 ## Code layout
 

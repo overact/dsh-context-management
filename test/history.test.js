@@ -35,6 +35,36 @@ test('event IDs remain stable through repeated rotations; older history is not e
   assert.equal(f.plugin.states.get(s).windows.length, 3);
 });
 
+test('window, goal and checklist IDs advertised in a handoff stay readable', async t => {
+  const f = await fixture(); t.after(f.dispose);
+  const a = await f.agent(); const s = a.session;
+  const goal = s.append('goal/change', { goal: { phase: 'active', objective: 'Ship the window fix' } });
+  const todo = s.append('todo/write', { todos: [{ content: 'Write tests', status: 'in_progress' }] });
+  user(s, 'x'.repeat(40_000)); user(s, 'latest');
+  assert.ok(await f.native.compactNow(a, new AbortController().signal));
+  const h = new HistoryStore(s, f.plugin.states);
+  // Every handoff prints these IDs; reading one must not come back null.
+  const window = h.listWindows({ recent_first: false })[0];
+  const summary = h.readItem({ item_id: window.summary_item_id });
+  assert.ok(summary, `${window.summary_item_id} must be readable`);
+  assert.equal(summary.event_type, 'compaction/summary');
+  assert.equal(summary.role, 'system');
+  assert.equal(summary.window_id, 'win_001');
+  assert.match(summary.content, /<context_window id="win_002"/);
+  // JSON format still returns the complete durable record, raw output included.
+  const raw = JSON.parse(h.readItem({ item_id: window.summary_item_id, format: 'json' }).content);
+  assert.equal(raw.type, 'compaction/summary');
+  assert.equal(raw.data.rawOutput[0].text, 'Fixture legacy summary.');
+  assert.match(h.readItem({ item_id: `item_${goal.seq}` }).content, /Ship the window fix/);
+  assert.match(h.readItem({ item_id: `item_${todo.seq}` }).content, /Write tests/);
+  // Scope: the records stay out of the message-shaped listing. Their text is
+  // still searchable through the handoff checkpoint message that carries it.
+  assert.equal(h.listItems({ limit: 50 }).items.some(i => i.event_type === 'compaction/summary'), false);
+  const found = h.searchContents({ query: 'Ship the window fix' });
+  assert.ok(found.matches.length >= 1);
+  assert.equal(found.matches[0].event_type, 'user/message');
+});
+
 test('bounded cursor scans find old matches without duplicate items or full-output search responses', () => {
   const s = Session.create('pagination');
   user(s, 'NEEDLE ' + 'x'.repeat(1_000_000));

@@ -150,7 +150,9 @@ function checks(req) {
   for (const [pkg, names] of Object.entries(req.imports)) {
     add(`import ${pkg}`, 'fail', async ({ dsh }) => {
       const mod = await dsh.import(pkg);
-      const missing = names.filter(n => typeof mod[n] !== 'function');
+      // A named import may be a function or a constant (for example an error
+      // code); only its presence is required.
+      const missing = names.filter(n => mod[n] === undefined);
       if (missing.length) throw new Error(`missing export(s): ${missing.join(', ')}`);
       return names.join(', ');
     });

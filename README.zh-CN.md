@@ -6,7 +6,7 @@
 
 ## 当前适配
 
-版本 **0.3.0**，已针对 **DSH 0.1.7-rc.2 / Node.js ≥ 22.15** 验证。peer 范围为 `>=0.1.7-alpha.1`（不设上限）：DSH 0.1.7-rc.1 起会在启动时跳过 peer 范围不含当前版本的插件，设上限会让插件在 DSH 升级后被静默跳过。兼容性改由[安装前检查](#安装前检查)按功能判断，而不是按版本号。
+版本 **0.3.1**，已针对 **DSH 0.2.0-rc.2 / Node.js ≥ 22.15** 验证。peer 范围为 `>=0.1.7-alpha.1`（不设上限）：DSH 0.1.7-rc.1 起会在启动时跳过 peer 范围不含当前版本的插件，设上限会让插件在 DSH 升级后被静默跳过。兼容性改由[安装前检查](#安装前检查)按功能判断，而不是按版本号。
 
 - 通过 DSH 官方扩展点工作：`@local/dsh-context-management/compaction` 是 `BasicCompactionEngine` 的子类，重写官方子类钩子 `summarize()` 和动态分派的 `compactIfNeeded()`；不 monkey-patch 实例方法，不读取 Cordis 内部结构。
 - 复用原生的工具调用配对检查、保留近期对话、并发维护锁、取消、缩减检查、压缩事务、落盘和 overflow 重试。
@@ -14,7 +14,7 @@
 - 宿主插件发布 `contextWindows` 服务（会话状态与设置）；preset 里的引擎按调用查找它而非 `inject`。宿主缺席时引擎行为与原生完全一致，preset 不会因依赖缺失而失去压缩。
 - 只有挂载了该引擎的 preset 才能用 `new_context`；其他 preset 调用会明确报错，notes/history 工具仍可用。
 - 只有 DSH 真正提交替换消息，窗口编号才推进。失败、取消和无可压缩历史不会假报换窗成功。
-- 每次换窗都会生成一份有长度上限的交接。默认（`handoffSummary: generated`）对被换出的部分调用**一次**原生摘要模型，把摘要放进 `<generated_handoff>`，并与目标、待办、近期用户指令、近期笔记和窗口目录一起组成交接；`compaction/summary` 事件记录真实摘要模型的 provider/model/usage，费用统计可见。摘要调用失败时退回截取式交接，不阻塞换窗。`handoffSummary: extractive` 完全不额外调用模型。停用插件或工具时回退原生摘要生成。
+- 每次换窗都会生成一份有长度上限的交接。默认（`handoffSummary: generated`）对被换出的部分调用**一次**原生摘要模型，把摘要放进 `<generated_handoff>`，并与目标、待办、近期用户指令、近期笔记和窗口目录一起组成交接；强制状态段先渲染，正文拿剩余的全部字符，因此没用完的快照预留会回补给正文而不是被浪费；可选笔记预览有上限，无法侵占这份预留。`compaction/summary` 事件记录真实摘要模型的 provider/model/usage（即使正文最终退化为截取式），费用统计可见。摘要调用失败、或剩余预算放不下可用正文时，退回截取式交接，不阻塞换窗，并在窗口记录里写明原因（`generated_discarded: budget`）。`handoffSummary: extractive` 完全不额外调用模型。停用插件或工具时回退原生摘要生成。
 
 ## 工作原理
 
@@ -42,7 +42,7 @@ flowchart TD
 | --- | --- |
 | `new_context` | 请求在下一个安全 step 边界换窗 |
 | `notes_write_file` / `notes_append_to_file` / `notes_read_file` / `notes_list_files_by_prefix` / `notes_search_contents` | 会话私有笔记，跨换窗与重启保留 |
-| `history_list_windows` / `history_list_items` / `history_read_item` / `history_search_contents` | 分页检索本会话的完整原始历史 |
+| `history_list_windows` / `history_list_items` / `history_read_item` / `history_search_contents` | 分页检索本会话的完整原始历史；`history_read_item` 也能读取每份交接都会打印的窗口摘要、目标与清单 item ID |
 
 ## 使用
 
@@ -50,7 +50,7 @@ flowchart TD
 
 模型调用 `new_context` 时，返回的是 **requested**，不是 reset：换窗安排在下一个安全 step 边界，本步工具结果会先完整写入历史。若 DSH 的 `auto` 关闭，插件仍处理显式换窗请求。
 
-网页“上下文管理”页使用 DSH 0.1.7 的 `configForms`，与 `/ctx` 共用后端设置。读取失败、只读连接和保存失败不会伪装成切换成功。设置修改无需重启；**升级插件代码后，运行中的 DSH 仍需要重载插件或重启，并刷新网页**。
+网页“上下文管理”页使用 DSH 0.2.0 的 `configForms`，与 `/ctx` 共用后端设置。读取失败、只读连接和保存失败不会伪装成切换成功。设置修改无需重启；**升级插件代码后，运行中的 DSH 仍需要重载插件或重启，并刷新网页**。
 
 ## 保存与恢复
 
@@ -197,7 +197,7 @@ npm run verify
 
 历史读取是增量的：10,000 条合成事件的首次状态构建约 2.5 ms，未变化时重复读取扫描 **0 条事件**（绝对时间仅供参考；回归测试约束的是增量读取、扫描上限和输出上限）。
 
-0.3.0 在 DSH 0.1.7-rc.2 上通过 64 项测试（含安装前检查：用只缺少某个钩子的替身 DSH 验证它只报告该项功能）。
+0.3.1 在 DSH 0.2.0-rc.2 上通过 73 项测试（含安装前检查：用只缺少某个钩子的替身 DSH 验证它只报告该项功能）。
 
 ## 代码结构
 

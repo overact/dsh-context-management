@@ -69,6 +69,22 @@ test('preflight passes on the real DSH', async () => {
   }
 });
 
+test('preflight accepts a constant DSH import and still fails on a missing one', async () => {
+  const names = requirements().imports['@deepseek-ai/dsh-llm'];
+  assert.ok(names.includes('IMAGE_OFFLOAD_REQUIRED_CODE'), 'the error-code constant stays a derived requirement');
+  const stub = names.filter(n => n !== 'createUserMessage').map(n => `export const ${n} = 'stub';\n`).join('');
+  const env = fixture({ stubs: { 'dsh-llm': stub } });
+  try {
+    const check = (await env.run()).results.find(r => r.id === 'import @deepseek-ai/dsh-llm');
+    // A non-function export is usable, so only the genuinely absent name fails.
+    assert.equal(check.ok, false);
+    assert.match(check.detail, /missing export\(s\): createUserMessage/);
+    assert.doesNotMatch(check.detail, /IMAGE_OFFLOAD_REQUIRED_CODE/);
+  } finally {
+    env.dispose();
+  }
+});
+
 test('preflight reports a missing compaction hook, not a version', async () => {
   const env = fixture({ stubs: { 'dsh-compaction-basic': 'export class BasicCompactionEngine { compactIfNeeded() {} }\n' } });
   try {

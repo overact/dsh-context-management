@@ -31,7 +31,9 @@ test('generated handoffs are bounded and keep the session snapshot', () => {
   s.append('todo/write', { todos: [{ content: 'Finish YAML', status: 'in_progress' }] });
   const generated = { text: '## Primary Request\n' + 'g'.repeat(50_000), provider: 'p', model: 'm' };
   const engine = new WindowEngine(states);
-  assert.equal(engine.prepare(s, 7000, generated).record.summary_kind, 'extractive');
+  const tiny = engine.prepare(s, 7000, generated);
+  assert.equal(tiny.record.summary_kind, 'extractive');
+  assert.equal(tiny.record.generated_discarded, 'budget');
   for (const budget of [12000, 16000, 32000]) {
     const handoff = engine.prepare(s, budget, generated);
     assert.equal(handoff.record.summary_kind, 'generated');
@@ -52,4 +54,29 @@ test('note capacity checks apply to write and append without evicting notes', ()
   assert.throws(() => notes.appendToFile('self', 'c', 'x'), /file limit/);
   assert.throws(() => notes.appendToFile('self', 'a', 'xxxxx'), /byte limit/);
   assert.equal(notes.readFile('self', 'a').content, 'abc');
+});
+
+const bodyOf = header => header.match(/<generated_handoff>\n([\s\S]*?)\n<\/generated_handoff>/)?.[1] ?? '';
+
+test('an unused generated reserve returns to the handoff body, and notes cannot consume it', () => {
+  const generated = { text: '## Body\n' + 'g'.repeat(60_000), provider: 'p', model: 'm' };
+
+  // Sparse state: the snapshot allowance the record cannot spend is body content
+  // now, instead of being stranded while the body is truncated.
+  const lean = new WindowEngine(new SessionStateStore()).prepare(Session.create('sparse'), 16000, generated);
+  assert.equal(lean.record.summary_kind, 'generated');
+  assert.ok(lean.header.length <= 16000, `${lean.header.length} > 16000`);
+  assert.ok(bodyOf(lean.header).length >= 12_000, `body ${bodyOf(lean.header).length} did not reclaim the reserve`);
+  assert.match(lean.header, /\n<\/generated_handoff>/);
+
+  // Oversized note previews stay bounded above the body baseline and never break
+  // the body frame: the handoff is still usable and complete.
+  const noted = Session.create('notes'), noteStates = new SessionStateStore();
+  for (let i = 0; i < 8; i++) noteStates.writeNote(noted, `n${i}`, 'n'.repeat(9_000));
+  const heavy = new WindowEngine(noteStates).prepare(noted, 16000, generated);
+  assert.equal(heavy.record.summary_kind, 'generated');
+  assert.ok(heavy.header.length <= 16000, `${heavy.header.length} > 16000`);
+  assert.ok(bodyOf(heavy.header).length >= 5_000, `body ${bodyOf(heavy.header).length} was starved by notes`);
+  assert.match(heavy.header, /Note self\/notes\/n/);
+  assert.match(heavy.header, /\n<\/generated_handoff>/);
 });
