@@ -197,7 +197,7 @@ Coverage includes the real Cordis lifecycle, DSH ToolRuntime, SettingsProvider, 
 
 History reads are incremental: building state for 10,000 synthetic events takes ~2.5 ms the first time, and an unchanged re-read scans **0 events** (timings are indicative only; the regression tests pin incremental reads, scan limits and output limits).
 
-0.3.1 passes 73 tests on DSH 0.2.0-rc.2, including the preflight: a stand-in DSH missing one hook must make it report exactly that capability.
+0.3.1 passes 75 tests on DSH 0.2.0-rc.2, including the preflight: a stand-in DSH missing one hook must make it report exactly that capability.
 
 ## Code layout
 
