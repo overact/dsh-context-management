@@ -44,7 +44,7 @@ function recognisedHeadings(text) {
   for (const line of text.split('\n')) {
     const match = fence.exec(line);
     if (open !== null) {
-      if (match !== null && match[1][0] === open[0] && match[1].length >= open.length && match[2].trim() === '') open = null;
+      if (match !== null && match[1][0] === open[0] && match[1].length >= open.length && /^[ \t]*$/.test(match[2])) open = null;
       continue;
     }
     if (match !== null) {
@@ -223,6 +223,71 @@ test('a longer fence is not closed by a shorter run of the same character', () =
     section('Critical Context', 400),
   ].join('\n');
   assert.deepEqual(recognisedHeadings(clipSections(text, 600)), ['Primary Request and Intent', 'Critical Context']);
+});
+
+test('a space that is not a space does not close a fence', () => {
+  // Only spaces or tabs may follow a closing delimiter. Reading a full-width space as
+  // one ends the block early, and every code line after it becomes a section heading.
+  const text = [
+    section('Primary Request and Intent', 400),
+    '```md', '## Not a section', '```\u3000',
+    section('Critical Context', 400),
+  ].join('\n');
+  for (const budget of [text.length, 600]) {
+    assert.deepEqual(recognisedHeadings(clipSections(text, budget)), ['Primary Request and Intent']);
+  }
+});
+
+test('a CRLF body gets the same fence repair as an LF one', () => {
+  // A carriage return is a line ending too, and `.` does not match it: a delimiter
+  // line ending in CR was invisible to the repair, so the block stayed open and the
+  // `## ` lines inside it were read as sections.
+  const unclosed = ['## A', 'a'.repeat(30), '```js', 'code', '## B', 'b'.repeat(20)].join('\r\n') + '\r\n';
+  for (const budget of [40, 60, 80, 100]) {
+    assert.equal(fenceLines(clipSections(unclosed, budget)) % 2, 0, `budget ${budget}: an open fence survived`);
+  }
+  const fenced = ['## Primary Request and Intent', 'p'.repeat(300), '```md', '## Not a section', '```',
+    '## Critical Context', 'c'.repeat(300)].join('\r\n');
+  const plan = planHandoff(fenced, 400);
+  assert.deepEqual(plan.pieces.map(piece => piece.name), ['Primary Request and Intent', 'Critical Context']);
+  assert.equal(fenceLines(plan.text) % 2, 0);
+});
+
+test('a piece the fence repair emptied is reported, not called whole', () => {
+  // The repair retreats out of a block it cannot close inside the piece's grant. The
+  // text is gone either way, but a receipt that counted it as kept overstates the
+  // handoff: this reported "7 of 36 kept" while 2 characters had survived.
+  const text = `## A\n${'a'.repeat(20)}\n## B\n\`\`\`\nx`;
+  const plan = planHandoff(text, 32);
+  assert.equal(plan.sectioned, true);
+  const piece = plan.pieces.find(item => item.name === 'B');
+  assert.deepEqual(
+    { kept: piece.kept, original: piece.original, shortened: piece.shortened },
+    { kept: 0, original: 5, shortened: true });
+  assert.equal(plan.keptSource, plan.pieces.reduce((sum, item) => sum + item.kept, 0));
+  assert.match(clippingReceipt(plan), /2 of 36/);
+});
+
+test('the fallback clip reports source characters, not the marker that marks them', () => {
+  // The clip spends budget on the marker itself, so the excerpt is longer than the
+  // text it kept: this reported 98 of 1 000 when 85 characters of the reply survived.
+  const plan = planHandoff('x'.repeat(1_000), 100);
+  assert.equal(plan.text.length, 98);
+  assert.equal(plan.keptSource, 85);
+  assert.match(clippingReceipt(plan), /85 of 1000 source characters kept/);
+});
+
+test('a repair that would empty the excerpt hands the excerpt on instead', () => {
+  // Deleting every character protects no following heading — the cut already ends the
+  // text — and it cost the next window its handoff body outright. The receipt still
+  // reports the source characters the repair got to keep.
+  const body = `\`\`\`js\n${'x'.repeat(1_000)}`;
+  const out = clipSections(body, 100);
+  assert.equal(out.length, 98);
+  assert.ok(out.startsWith('```js\n'));
+  assert.equal(planHandoff(body, 100).keptSource, 85);
+  // The same guard keeps an excerpt that fits the budget in one piece.
+  assert.equal(clipSections('```\nx', 5), '```\nx');
 });
 
 test('an empty section keeps its heading rather than vanishing', () => {
