@@ -116,3 +116,38 @@ test('the quoted body allowance is the grant the very next clip applies', () => 
   assert.equal(engine.bodyAllowance(s, 100, flat), 0);
   assert.equal(states.get(s).windows.length, 1);
 });
+
+test('an oversized sectioned handoff keeps every section the host mandates', () => {
+  const s = Session.create('sections'), states = new SessionStateStore();
+  for (let i = 0; i < 4; i++) user(s, `User ${i}: ` + 'u'.repeat(1_000));
+  // The host's directive mandates these eight sections in this order, and writes
+  // `## Critical Context` LAST — so a tail cut spends the whole body budget on
+  // the earlier sections and deletes decisions and open questions outright.
+  const titles = ['Primary Request and Intent', 'Key Technical Concepts', 'Files and Code',
+    'Errors and Fixes', 'Pending Jobs', 'Current Work', 'Next Step', 'Critical Context'];
+  const sizes = [1331, 2229, 4708, 3356, 300, 936, 512, 2336];
+  const text = titles.map((title, i) => {
+    const head = `## ${title}\n`, bullet = `- ${title.toLowerCase()} detail\n`;
+    return head + bullet.repeat(Math.ceil((sizes[i] - head.length) / bullet.length)).slice(0, sizes[i] - head.length);
+  }).join('\n');
+  const engine = new WindowEngine(states);
+  const { header, record } = engine.prepare(s, 16000, { text, provider: 'p', model: 'm' });
+  assert.ok(header.length <= 16000, `${header.length} > 16000`);
+  assert.equal(record.summary_kind, 'generated');
+  const body = bodyOf(header);
+  assert.deepEqual([...body.matchAll(/^## (.+)$/gm)].map(m => m[1]), titles);
+  for (const title of ['Critical Context', 'Next Step', 'Current Work']) {
+    assert.ok(body.includes(`## ${title}\n- ${title.toLowerCase()} detail`), `${title} was trimmed`);
+  }
+  // The long excerpts are what pays for the sections that carry the decisions.
+  assert.match(body, /## Files and Code\n[\s\S]*… \[truncated\]/);
+  // A mechanised receipt says what was dropped, outside the summarizer's own
+  // prose: a marker it writes is not durable evidence that a section is partial.
+  const receipt = header.match(/<clipping_receipt>([\s\S]*?)<\/clipping_receipt>/)?.[1] ?? '';
+  assert.match(receipt, /Clipped by priority/);
+  assert.match(receipt, /Shortened: .*Files and Code \d+\/\d+/);
+  // It reports the clip, and does not certify the summarizer's own completeness.
+  assert.doesNotMatch(receipt, /complete/i);
+  assert.ok(header.indexOf('<clipping_receipt>') < header.indexOf('<generated_handoff>'),
+    'the receipt belongs between the header and the body');
+});

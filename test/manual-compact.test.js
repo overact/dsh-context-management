@@ -117,8 +117,12 @@ test('the summarizer is told the character ceiling its body is clipped to', asyn
   // own directive, and it is prompt scaffolding only: it never reaches the
   // session or the durable checkpoint.
   const hint = textContent(seen.messages.at(-1).content);
-  assert.match(hint, /^Compaction budget: only the first ~(\d+) characters/);
+  assert.match(hint, /^Compaction budget: aim for at most ~(\d+) characters/);
   assert.equal(seen.messages.filter(m => textContent(m.content).includes('Compaction budget')).length, 1);
+  // The note has to describe the trim the clip actually performs: an overrun is
+  // spent on the expendable sections, not cut off the end of the reply.
+  assert.match(hint, /spent by priority rather than cut off the end/);
+  assert.match(hint, /is a preference rather than a guarantee/);
   const quoted = Number(hint.match(/~(\d+) characters/)[1]);
   const event = s.snapshotEvents().filter(e => e.type === 'compaction/summary').at(-1);
   const header = event.data.summary[0].text;
@@ -133,6 +137,40 @@ test('the summarizer is told the character ceiling its body is clipped to', asyn
   const surviving = body.endsWith(TRUNCATION_MARKER) ? body.length - TRUNCATION_MARKER.length : body.length;
   assert.ok(quoted <= surviving, `quoted ${quoted} exceeds surviving ${surviving}`);
   assert.ok(surviving - quoted < 400, `quoted ${quoted} but survived ${surviving}`);
+});
+
+test('an overflowing reply keeps Critical Context through the whole /compact path', async t => {
+  const f = await fixture({ config: { handoffMaxChars: 16000 } }); t.after(f.dispose);
+  await withCompactCommand(f);
+  // The eight sections the host's directive mandates, sized like the live reply
+  // that overflowed: ~15.7k characters against a ~12.9k grant.
+  const titles = ['Primary Request and Intent', 'Key Technical Concepts', 'Files and Code',
+    'Errors and Fixes', 'Pending Jobs', 'Current Work', 'Next Step', 'Critical Context'];
+  const sizes = [1331, 2229, 4708, 3356, 300, 936, 512, 2336];
+  const text = titles.map((title, i) => {
+    const head = `## ${title}\n`, bullet = `- ${title.toLowerCase()} detail\n`;
+    return head + bullet.repeat(Math.ceil((sizes[i] - head.length) / bullet.length)).slice(0, sizes[i] - head.length);
+  }).join('\n');
+  const { agent, s } = await longSession(f, {
+    summarizer: async () => {
+      const summary = [{ type: 'text', text }];
+      return { summary, rawOutput: summary, provider: 'fixture-provider', model: 'fixture-summarizer',
+        maxTokens: 4000, llmStreamCall: true, usage: { inputTokens: 20_000, outputTokens: 5_000 } };
+    },
+  });
+  await f.ctx.commands.execute(agent, '/compact', [], signal());
+  await f.plugin.handoffWrites;
+  const event = s.snapshotEvents().filter(e => e.type === 'compaction/summary').at(-1);
+  const header = event.data.summary[0].text;
+  assert.ok(header.length <= 16000, `${header.length} > 16000`);
+  assert.ok(event.data.rawOutput[0].text.length > text.length - 1, 'the reply really did overflow');
+  const body = header.match(/<generated_handoff>\n([\s\S]*?)\n<\/generated_handoff>/)[1];
+  assert.ok(event.data.rawOutput[0].text.length > body.length + 1_000,
+    `reply ${event.data.rawOutput[0].text.length} did not overflow body ${body.length}`);
+  assert.deepEqual([...body.matchAll(/^## (.+)$/gm)].map(m => m[1]), titles);
+  // The section the host writes last is the one the old tail cut deleted.
+  assert.match(body, /## Critical Context\n- critical context detail/);
+  assert.match(body, /## Files and Code\n[\s\S]*… \[truncated\]/);
 });
 
 test('a failed budget measurement costs the note, never the generated handoff', async t => {
