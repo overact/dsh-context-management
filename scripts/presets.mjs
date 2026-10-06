@@ -78,6 +78,44 @@ export function sameYaml(YAML, a, b) {
   catch { return false; }
 }
 
+const isPlainObject = value => value !== null && typeof value === 'object' && !Array.isArray(value)
+  && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+
+/**
+ * Whether `current` states everything `generated` states, so the only difference
+ * is what the profile added inside the block. The direction is the point: the
+ * profile owns the file and may add (a `config` on a restated row, a whole row),
+ * while a value the generator states differently — or one it states and the file
+ * dropped — is stale. Rows are matched by `id` when they have one, so an inserted
+ * row does not shift its neighbours. A key the profile carries that the generator
+ * no longer states is indistinguishable from an addition, so a host-side removal
+ * of exactly that key is not reported.
+ */
+function carries(current, generated) {
+  if (isDeepStrictEqual(current, generated)) return true;
+  if (Array.isArray(generated)) {
+    if (!Array.isArray(current)) return false;
+    const keyed = generated.every(item => isPlainObject(item) && typeof item.id === 'string');
+    if (keyed) return generated.every(item => {
+      const found = current.find(candidate => isPlainObject(candidate) && candidate.id === item.id);
+      return found !== undefined && carries(found, item);
+    });
+    return generated.length <= current.length && generated.every((item, i) => carries(current[i], item));
+  }
+  if (isPlainObject(generated)) {
+    if (!isPlainObject(current)) return false;
+    return Object.entries(generated).every(([key, value]) => key in current && carries(current[key], value));
+  }
+  return false;
+}
+
+/** `carries`, on two patch texts. Same fallback as `sameYaml`: parse, or bytes. */
+export function carriesYaml(YAML, current, generated) {
+  if (current === generated) return true;
+  try { return carries(parseYaml(YAML, current), parseYaml(YAML, generated)); }
+  catch { return false; }
+}
+
 /** Ids of shipped presets that the profile already overrides outside the generated block. */
 export function foreignOverrides(patchText, overrides) {
   const { before, after } = splitBlock(patchText);

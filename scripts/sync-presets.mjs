@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveDshDir, profileDir, fromDsh, parseArgs } from './dsh-env.mjs';
-import { NATIVE, WINDOWED, BEGIN, END, shippedOverrides, splitBlock, foreignOverrides, sameYaml } from './presets.mjs';
+import { NATIVE, WINDOWED, BEGIN, END, shippedOverrides, splitBlock, foreignOverrides, sameYaml, carriesYaml } from './presets.mjs';
 import { runPreflight, report } from './preflight.mjs';
 
 /** The `yaml` module as the DSH install sees it, or null (then --check compares bytes). */
@@ -51,8 +51,10 @@ async function main() {
     next = before.replaceAll(NATIVE, WINDOWED) + (before.endsWith('\n\n') ? '' : '\n') + generated + after.replaceAll(NATIVE, WINDOWED);
     if (args.check) {
       // Compare meaning, not bytes: DSH re-folds long lines when it rewrites the patch.
+      // A profile may also add its own keys to a restated row; that is an edit the
+      // file keeps, not staleness, so it does not warn.
       const YAML = await loadYaml(dshDir);
-      if (!sameYaml(YAML, next, current)) {
+      if (!sameYaml(YAML, next, current) && !carriesYaml(YAML, current, next)) {
         console.error(`context-management: preset overrides in ${patchFile} are stale for dsh-web-app@${version}; run scripts/sync-presets.mjs`);
         process.exit(1);
       }

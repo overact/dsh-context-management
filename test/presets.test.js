@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { dshRoot } from './helpers/dsh.js';
-import { sameYaml, shippedOverrides } from '../scripts/presets.mjs';
+import { sameYaml, carriesYaml, shippedOverrides } from '../scripts/presets.mjs';
 
 const fromDsh = createRequire(join(realpathSync(dshRoot), 'package.json'));
 const mod = await import(pathToFileURL(fromDsh.resolve('yaml')).href);
@@ -51,4 +51,55 @@ test('the shipped presets, restated and re-folded by DSH, still count as current
   const swapped = block.replace("'@local/dsh-context-management/compaction'", "'@deepseek-ai/dsh-compaction-basic'");
   assert.notEqual(swapped, block);
   assert.ok(!sameYaml(YAML, block, rewrittenByDsh(swapped)), 'a real change in the restated preset is still stale');
+});
+
+// A profile may extend a restated row with its own keys; that is an edit the file
+// keeps, so --check must not call it stale.
+const RESTATED = [
+  '- id: preset-standard',
+  '  config:',
+  '    plugins:',
+  '      - id: plugin-one',
+  "        name: '@deepseek-ai/dsh-plugin-one'",
+  '      - id: plugin-two',
+  "        name: '@deepseek-ai/dsh-plugin-two'",
+  '',
+].join('\n');
+const EXTENDED = RESTATED.replace(
+  "        name: '@deepseek-ai/dsh-plugin-one'\n",
+  "        name: '@deepseek-ai/dsh-plugin-one'\n        config:\n          retries: 2\n",
+);
+
+test('a row the profile extended counts as current', () => {
+  assert.notEqual(EXTENDED, RESTATED, 'fixture must actually add the config');
+  assert.ok(!sameYaml(YAML, RESTATED, EXTENDED), 'sameYaml alone calls this stale');
+  assert.ok(carriesYaml(YAML, EXTENDED, RESTATED));
+  assert.ok(carriesYaml(YAML, rewrittenByDsh(EXTENDED), RESTATED), 'nor does DSH re-folding it');
+  assert.ok(carriesYaml(YAML, RESTATED, RESTATED));
+});
+
+test('what the generator states must still be there, or it is stale', () => {
+  const renamed = RESTATED.replace('dsh-plugin-two', 'dsh-plugin-other');
+  assert.ok(!carriesYaml(YAML, renamed, RESTATED), 'a stated value that changed is stale');
+  const droppedRow = RESTATED.replace("      - id: plugin-two\n        name: '@deepseek-ai/dsh-plugin-two'\n", '');
+  assert.ok(!carriesYaml(YAML, droppedRow, RESTATED), 'a stated row the file dropped is stale');
+  const droppedKey = RESTATED.replace("        name: '@deepseek-ai/dsh-plugin-two'\n", '');
+  assert.ok(!carriesYaml(YAML, droppedKey, RESTATED), 'a stated key the file dropped is stale');
+  assert.ok(!carriesYaml(YAML, '- foo\n', '- !!js foo\n'), 'the !!js tag is still part of the meaning');
+});
+
+test('an inserted row does not shift its neighbours', () => {
+  const inserted = RESTATED.replace(
+    '      - id: plugin-two\n',
+    "      - id: plugin-extra\n        name: '@deepseek-ai/dsh-plugin-extra'\n      - id: plugin-two\n",
+  );
+  assert.notEqual(inserted, RESTATED);
+  assert.ok(carriesYaml(YAML, inserted, RESTATED));
+});
+
+test('carriesYaml keeps the same parse-or-bytes fallback as sameYaml', () => {
+  assert.ok(!carriesYaml(null, RESTATED, EXTENDED));
+  assert.ok(carriesYaml(null, RESTATED, RESTATED));
+  assert.ok(!carriesYaml(YAML, 'id: [unclosed', RESTATED));
+  assert.ok(carriesYaml(YAML, 'id: [unclosed', 'id: [unclosed'));
 });

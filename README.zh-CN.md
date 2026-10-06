@@ -181,11 +181,11 @@ Web 宿主不提供全局 `compaction`，压缩引擎位于各 preset 的隔离�
 
 ```bash
 node scripts/sync-presets.mjs            # 生成/刷新（写入前保存 cordis.patch.yml.pre-sync）
-node scripts/sync-presets.mjs --check    # 生成块与已安装 DSH 不一致时退出码 1（按解析后的 YAML 比较，DSH 重新折行不算不一致）
+node scripts/sync-presets.mjs --check    # 生成块与已安装 DSH 不一致时退出码 1（按解析后的 YAML 比较；DSH 重新折行、profile 在块内的补充都不算不一致）
 node scripts/sync-presets.mjs --remove   # 删除生成块并恢复原生行，完全回滚
 ```
 
-**每次升级 DSH 后必须重新运行**，否则这三个 preset 会停留在旧版本定义。建议在 DSH 的启动脚本里运行 `--check`，过期时在日志中告警。不要在网页编辑器里修改 standard/ptc/cordis：脚本发现生成块外存在同 id 覆盖时会拒绝写入。
+**每次升级 DSH 后必须重新运行**，否则这三个 preset 会停留在旧版本定义。建议在 DSH 的启动脚本里运行 `--check`，过期时在日志中告警。不要在网页编辑器里修改 standard/ptc/cordis：脚本发现生成块外存在同 id 覆盖时会拒绝写入。在块内重述的行上做补充属于你自己的编辑，会保留、也不算过期；但**重新生成会整块重写并丢弃这些补充**——旧文件会留在 `cordis.patch.yml.pre-sync`。
 
 ## 验证
 
@@ -200,7 +200,7 @@ npm run verify
 
 历史读取是增量的：10,000 条合成事件的首次状态构建约 2.5 ms，未变化时重复读取扫描 **0 条事件**（绝对时间仅供参考；回归测试约束的是增量读取、扫描上限和输出上限）。
 
-0.3.5 在 DSH 0.2.0-rc.2 上通过 104 项测试（含安装前检查：用只缺少某个钩子的替身 DSH 验证它只报告该项功能）。
+0.3.6 在 DSH 0.2.0-rc.2 上通过 108 项测试（含安装前检查：用只缺少某个钩子的替身 DSH 验证它只报告该项功能）。
 
 ## 代码结构
 

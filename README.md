@@ -181,11 +181,11 @@ The web host provides no global `compaction`; compaction engines live in each pr
 
 ```bash
 node scripts/sync-presets.mjs            # generate/refresh (saves cordis.patch.yml.pre-sync first)
-node scripts/sync-presets.mjs --check    # exit code 1 when the block is stale for the installed DSH (compares parsed YAML, so lines DSH re-folds don't count)
+node scripts/sync-presets.mjs --check    # exit code 1 when the block is stale for the installed DSH (parsed YAML: re-folded lines and the profile's own additions to the block don't count)
 node scripts/sync-presets.mjs --remove   # delete the block and restore native rows (full rollback)
 ```
 
-**Re-run it after every DSH upgrade**, or those three presets stay on the old definitions. Running `--check` from your DSH start-up script gives a log warning when they go stale. Do not edit standard/ptc/cordis in the web editor: the script refuses to write if it finds a same-id override outside the generated block.
+**Re-run it after every DSH upgrade**, or those three presets stay on the old definitions. Running `--check` from your DSH start-up script gives a log warning when they go stale. Do not edit standard/ptc/cordis in the web editor: the script refuses to write if it finds a same-id override outside the generated block. Adding to a restated row inside the block is yours to keep and is not stale, but a **regeneration rewrites the block and drops those additions** — the previous file stays as `cordis.patch.yml.pre-sync`.
 
 ## Verification
 
@@ -200,7 +200,7 @@ Coverage includes the real Cordis lifecycle, DSH ToolRuntime, SettingsProvider, 
 
 History reads are incremental: building state for 10,000 synthetic events takes ~2.5 ms the first time, and an unchanged re-read scans **0 events** (timings are indicative only; the regression tests pin incremental reads, scan limits and output limits).
 
-0.3.5 passes 104 tests on DSH 0.2.0-rc.2, including the preflight: a stand-in DSH missing one hook must make it report exactly that capability.
+0.3.6 passes 108 tests on DSH 0.2.0-rc.2, including the preflight: a stand-in DSH missing one hook must make it report exactly that capability.
 
 ## Code layout
 
