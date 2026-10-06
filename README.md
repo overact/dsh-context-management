@@ -91,8 +91,6 @@ The host's directive mandates eight sections and writes `## Critical Context` la
 
 A trimmed section ends with the `… [truncated]` marker, and a mechanically generated `<clipping_receipt>` line beside the body states how many source characters were kept, names the pieces this clip shortened with their kept and original lengths, and points at this window's summary item (`history_read_item` in JSON mode) for the untrimmed reply. A marker written by the summarizer is not durable evidence that a section is partial; the receipt is, and it survives into the next checkpoint. The receipt describes this clip only — it cannot certify that the summarizer omitted nothing — and it reports the reason when the reply is not sectioned at all or when the sectioned layout did not fit the budget. Its reservation is taken only when the reply actually has to be clipped.
 
-Because a summarizer cannot measure the length of its own reply, a generated handoff call also carries a budget note immediately before the host's own directive: a character ceiling measured from the same layout the clip applies, a per-section figure, and the order in which ground is given. The measurement is an estimate rather than an identity — the window record embeds a gist of the reply, and its JSON escaping differs from the probe's — so the record gist is itself clipped by escaped length to keep that divergence within a few hundred characters, and the note stays advisory: the priority trim above is what enforces the outcome. The note lives only inside that summarization request; it is never written to the session or to the handoff.
-
 ## Installation
 
 This plugin is not published to npm; the `@local/` scope marks it as a local plugin. Using the web profile as an example:
@@ -202,7 +200,7 @@ Coverage includes the real Cordis lifecycle, DSH ToolRuntime, SettingsProvider, 
 
 History reads are incremental: building state for 10,000 synthetic events takes ~2.5 ms the first time, and an unchanged re-read scans **0 events** (timings are indicative only; the regression tests pin incremental reads, scan limits and output limits).
 
-0.3.3 passes 102 tests on DSH 0.2.0-rc.2, including the preflight: a stand-in DSH missing one hook must make it report exactly that capability.
+0.3.4 passes 99 tests on DSH 0.2.0-rc.2, including the preflight: a stand-in DSH missing one hook must make it report exactly that capability.
 
 ## Code layout
 
