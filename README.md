@@ -87,6 +87,8 @@ History queries return `has_more` and `next_cursor`; keep the same filters and o
 
 The last four user instructions are quoted in chronological order, up to 1,000 characters each, with their event addresses, later corrections taking precedence. The handoff also keeps the active goal, open todos and a bounded set of recent notes; exact raw evidence is recovered through the history tools.
 
+Because a summarizer cannot measure the length of its own reply, a generated handoff call carries a budget note immediately before the host's own directive: the measured number of characters the clip will keep, a per-section allowance, and the order in which to give ground. `## Critical Context`, `Next Step` and `Current Work` are the last to lose, because the host's mandated section order puts them at the end, where an overrun is truncated. The number is measured from the same layout the clip applies, less a margin, so it is a ceiling the clip honours rather than an aspiration. The note lives only inside that summarization request; it is never written to the session or to the handoff.
+
 
 ## Installation
 
@@ -197,7 +199,7 @@ Coverage includes the real Cordis lifecycle, DSH ToolRuntime, SettingsProvider, 
 
 History reads are incremental: building state for 10,000 synthetic events takes ~2.5 ms the first time, and an unchanged re-read scans **0 events** (timings are indicative only; the regression tests pin incremental reads, scan limits and output limits).
 
-0.3.1 passes 78 tests on DSH 0.2.0-rc.2, including the preflight: a stand-in DSH missing one hook must make it report exactly that capability.
+0.3.2 passes 81 tests on DSH 0.2.0-rc.2, including the preflight: a stand-in DSH missing one hook must make it report exactly that capability.
 
 ## Code layout
 

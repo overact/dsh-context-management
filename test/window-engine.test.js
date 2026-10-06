@@ -4,6 +4,7 @@ import { Session, user } from './helpers/dsh.js';
 import { SessionStateStore } from '../lib/session-state.js';
 import { WindowEngine } from '../lib/window-engine.js';
 import { NotesStore } from '../lib/notes-store.js';
+import { TRUNCATION_MARKER } from '../lib/text.js';
 
 test('handoff preparation is bounded and side-effect free', () => {
   const s = Session.create('header'), states = new SessionStateStore();
@@ -79,4 +80,39 @@ test('an unused generated reserve returns to the handoff body, and notes cannot 
   assert.ok(bodyOf(heavy.header).length >= 5_000, `body ${bodyOf(heavy.header).length} was starved by notes`);
   assert.match(heavy.header, /Note self\/notes\/n/);
   assert.match(heavy.header, /\n<\/generated_handoff>/);
+});
+
+test('the quoted body allowance is the grant the very next clip applies', () => {
+  const states = new SessionStateStore();
+  const s = Session.create('allowance');
+  for (let i = 0; i < 8; i++) user(s, `User ${i}: ` + 'u'.repeat(1_000));
+  const engine = new WindowEngine(states);
+  // A body with nothing to JSON-escape makes the window record exactly as long in
+  // the probe as in the measured call, so this comparison is character-exact.
+  const flat = { text: 'gggg'.repeat(15_000), provider: 'p', model: 'm' };
+  const allowances = [];
+  for (const budget of [8000, 16000, 32000]) {
+    // Measuring lays out the same handoff the real call will, so the number the
+    // summarizer is held to and the number the clip enforces are the same one.
+    const allowance = engine.bodyAllowance(s, budget, flat);
+    const body = bodyOf(engine.prepare(s, budget, flat).header);
+    assert.ok(body.endsWith(TRUNCATION_MARKER));
+    assert.equal(body.length - TRUNCATION_MARKER.length, allowance, `cap ${budget}`);
+    allowances.push(allowance);
+  }
+  // The grant follows the cap instead of being pinned by a fixed reserve, which
+  // is what the summarizer's ceiling is measured against.
+  assert.ok(allowances[0] < allowances[1] && allowances[1] < allowances[2], allowances.join(', '));
+  assert.ok(allowances[2] > 10_000, `largest allowance ${allowances[2]}`);
+  // A realistic multi-line body diverges only by the record's JSON escaping of
+  // the summary it clips — an order of magnitude below the margin the controller
+  // keeps, and it errs towards a smaller grant, never a larger one.
+  const lines = { text: Array.from({ length: 2_000 }, (_, i) => `- bullet ${i}`).join('\n'), provider: 'p', model: 'm' };
+  const measured = engine.bodyAllowance(s, 16000, lines);
+  const real = bodyOf(engine.prepare(s, 16000, lines).header).length - TRUNCATION_MARKER.length;
+  assert.ok(real <= measured && measured - real < 200, `measured ${measured}, real ${real}`);
+  // A cap that cannot carry a generated body reports no allowance rather than a
+  // number the clip would not honour, and measuring commits nothing.
+  assert.equal(engine.bodyAllowance(s, 100, flat), 0);
+  assert.equal(states.get(s).windows.length, 1);
 });

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, user, dsh, llm } from './helpers/dsh.js';
 import { HistoryStore } from '../lib/history-store.js';
+import { textContent, TRUNCATION_MARKER } from '../lib/text.js';
 
 const signal = () => new AbortController().signal;
 
@@ -28,8 +29,17 @@ function turn(session, n, output) {
   session.append('turn/end', { turn: n });
 }
 
+/** The auxiliary summarizer's real envelope, carrying a body the size a real one produces. */
+function summarizerStub(summaryChars = 18_624) {
+  return async () => {
+    const summary = [{ type: 'text', text: '## Primary Request and Intent\n' + 'S'.repeat(summaryChars) }];
+    return { summary, rawOutput: summary, provider: 'fixture-provider', model: 'fixture-summarizer',
+      maxTokens: 4000, llmStreamCall: true, usage: { inputTokens: 20_000, outputTokens: 5_000 } };
+  };
+}
+
 /** A long session whose auxiliary summary is the size a real one produces. */
-async function longSession(f, summaryChars = 18_624) {
+async function longSession(f, { summaryChars = 18_624, summarizer } = {}) {
   const agent = await f.agent(); const s = agent.session;
   s.append('request/header', { reason: 'initial', header: { config: { provider: 'fixture', model: 'fixture' } } });
   s.append('goal/change', { goal: { phase: 'active', objective: 'Keep the rotation honest' } });
@@ -40,11 +50,7 @@ async function longSession(f, summaryChars = 18_624) {
   turn(s, 1, 'output '.repeat(2_500));
   turn(s, 2, 'more output '.repeat(2_000));
   user(s, 'Now compress manually.');
-  f.native.nativeSummarize = async () => {
-    const summary = [{ type: 'text', text: '## Primary Request and Intent\n' + 'S'.repeat(summaryChars) }];
-    return { summary, rawOutput: summary, provider: 'fixture-provider', model: 'fixture-summarizer',
-      maxTokens: 4000, llmStreamCall: true, usage: { inputTokens: 20_000, outputTokens: 5_000 } };
-  };
+  f.native.nativeSummarize = summarizer ?? summarizerStub(summaryChars);
   return { agent, s };
 }
 
@@ -94,4 +100,58 @@ test('the manual handoff spends its declared budget instead of stranding it', as
   assert.match(read.value.content, /<context_window id="win_002"/);
   const history = new HistoryStore(s, f.plugin.states);
   assert.ok(history.readItem({ item_id: history.listWindows({ recent_first: false })[0].summary_item_id }));
+});
+
+test('the summarizer is told the character ceiling its body is clipped to', async t => {
+  const f = await fixture({ config: { handoffMaxChars: 16000 } }); t.after(f.dispose);
+  await withCompactCommand(f);
+  let seen = null;
+  const stub = summarizerStub();
+  const { agent, s } = await longSession(f, {
+    summarizer: (input, a, signal) => { seen = input; return stub(input, a, signal); },
+  });
+  await f.ctx.commands.execute(agent, '/compact', [], signal());
+  await f.plugin.handoffWrites;
+
+  // The budget is the last thing the summarizer reads, right before the host's
+  // own directive, and it is prompt scaffolding only: it never reaches the
+  // session or the durable checkpoint.
+  const hint = textContent(seen.messages.at(-1).content);
+  assert.match(hint, /^Compaction budget: only the first ~(\d+) characters/);
+  assert.equal(seen.messages.filter(m => textContent(m.content).includes('Compaction budget')).length, 1);
+  const quoted = Number(hint.match(/~(\d+) characters/)[1]);
+  const event = s.snapshotEvents().filter(e => e.type === 'compaction/summary').at(-1);
+  const header = event.data.summary[0].text;
+  assert.doesNotMatch(header, /Compaction budget/);
+  assert.ok(s.snapshotEvents().every(e => !JSON.stringify(e.data ?? {}).includes('Compaction budget')));
+
+  // The quoted ceiling is the one the clip honours: the handoff keeps at least
+  // that many characters of the reply, with a margin that stays tight enough to
+  // be worth quoting. A model cannot measure its own output, so the number has
+  // to be true rather than aspirational.
+  const body = header.match(/<generated_handoff>\n([\s\S]*?)\n<\/generated_handoff>/)[1];
+  const surviving = body.endsWith(TRUNCATION_MARKER) ? body.length - TRUNCATION_MARKER.length : body.length;
+  assert.ok(quoted <= surviving, `quoted ${quoted} exceeds surviving ${surviving}`);
+  assert.ok(surviving - quoted < 400, `quoted ${quoted} but survived ${surviving}`);
+});
+
+test('a failed budget measurement costs the note, never the generated handoff', async t => {
+  const f = await fixture({ config: { handoffMaxChars: 16000 } }); t.after(f.dispose);
+  await withCompactCommand(f);
+  const { agent, s } = await longSession(f);
+  // The note is advisory and is built inside the caller's degrade-to-extractive
+  // path, so a measurement failure must leave the request untouched rather than
+  // throw the generated summary away.
+  const controller = f.native.controller();
+  const engine = controller.windows;
+  let probes = 0;
+  controller.windows = { prepare: engine.prepare.bind(engine), bodyAllowance() { probes++; throw new Error('probe failed'); } };
+  const result = await f.ctx.commands.execute(agent, '/compact', [], signal());
+  await f.plugin.handoffWrites;
+  assert.equal(probes, 1, 'the measurement was attempted, and failed, on the real controller');
+  assert.equal(result.result.kind, 'success');
+  const event = s.snapshotEvents().filter(e => e.type === 'compaction/summary').at(-1);
+  assert.equal(event.data.provider, 'fixture-provider', 'the generated handoff still landed');
+  assert.equal(f.plugin.states.get(s).windows[0].summary_kind, 'generated');
+  assert.doesNotMatch(event.data.summary[0].text, /Compaction budget/);
 });
