@@ -1,3 +1,14 @@
 node_modules/
 *.log
 .DS_Store
+
+# Local agent guidance and private working material
+/AGENTS.md
+/agents.md
+/scratch/
+/work/
+/docs/handoffs/
+.env
+.env.*
+*.jsonl
+*.pre-sync

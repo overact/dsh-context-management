@@ -6,7 +6,7 @@ Windowed compaction, session-private notes and paged history recall for [DeepSee
 
 ## Compatibility
 
-Version **0.3.1**, verified on **DSH 0.2.0-rc.2 / Node.js ≥ 22.15**. Peer ranges are `>=0.1.7-alpha.1` with no upper bound: since 0.1.7-rc.1, DSH skips at startup any plugin whose peer range excludes the running version, so an upper bound would silently disable the plugin after a DSH upgrade. Compatibility is judged by capability instead, through the [preflight check](#preflight-check).
+Version **0.3.6**, verified on **DSH 0.2.0-rc.2 / Node.js ≥ 22.15**. Peer ranges are `>=0.1.7-alpha.1 || >=0.2.0-0`, admitting the 0.2.0 prereleases with no upper bound on stable releases: since 0.1.7-rc.1, DSH skips at startup any plugin whose peer range excludes the running version, so an upper bound would silently disable the plugin after a DSH upgrade. Compatibility is judged by capability instead, through the [preflight check](#preflight-check).
 
 - Works through official DSH extension points: `@local/dsh-context-management/compaction` subclasses `BasicCompactionEngine` and overrides the `summarize()` hook and the dynamically dispatched `compactIfNeeded()`. No instance monkey-patching, no reads of Cordis internals.
 - Reuses the native tool-call pairing checks, recent-turn retention, maintenance lock, cancellation, shrink check, compaction transaction, persistence and overflow retry.
