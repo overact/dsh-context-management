@@ -106,7 +106,7 @@ describe('NotesStore — Size Limit (<= 1,000,000 bytes)', () => {
       () => store.writeFile('agent1', 'overflow.txt', hugeText),
       /exceeds limit of 1000000 UTF-8 bytes/
     );
-    assert.equal(store.hasFile('agent1', 'overflow.txt'), false);
+    assert.equal(store.files.has('agent1/notes/overflow.txt'), false);
   });
 
   it('allows writing exactly 1,000,000 bytes', () => {
