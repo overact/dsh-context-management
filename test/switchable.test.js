@@ -63,4 +63,7 @@ test('disabling cancels queued rotations so re-enabling cannot execute stale con
   await f.ctx.settings.update('context-management', { enabled: false }); await Promise.resolve();
   await f.ctx.settings.update('context-management', { enabled: true }); await Promise.resolve();
   assert.equal(f.plugin.states.get(a.session).pending, null);
+  const notices = a.session.deriveMessages().filter(m => m.source?.kind === 'plugin:context-management');
+  assert.equal(notices.length, 1, 'the model is told once why the window did not arrive');
+  assert.match(JSON.stringify(notices[0].content), /Context management was disabled/);
 });
