@@ -8,7 +8,7 @@ import {
   notes_append_to_file,
   notes_write_file,
   NOTES_TOOLS,
-  createNotesExecutors,
+  readNotes,
 } from '../lib/tools/notes.js';
 
 describe('NotesStore — Write and Read Operations', () => {
@@ -381,12 +381,11 @@ describe('Notes Tools & Registration', () => {
     ];
 
     for (const tool of tools) {
-      assert.equal(tool.type, 'function');
       assert.ok(typeof tool.name === 'string');
       assert.ok(typeof tool.description === 'string');
       assert.equal(tool.parameters.type, 'object');
       assert.ok(tool.parameters.properties);
-      assert.ok(tool.function);
+      assert.equal(typeof tool.output.render, 'function');
     }
 
     assert.equal(NOTES_TOOLS.notes_write_file.name, 'notes_write_file');
@@ -396,32 +395,27 @@ describe('Notes Tools & Registration', () => {
     assert.deepEqual(notes_search_contents.parameters.required, ['query']);
   });
 
-  it('executes notes tools through createNotesExecutors', async () => {
+  it('serves bounded reads, search and listing from the session namespace', () => {
     const store = new NotesStore();
-    const executors = createNotesExecutors(store);
-    const exec = { agent: { name: 'agentY' } };
+    store.writeFile('self', 'summary.md', 'Line A\nLine B\nLine C');
+    assert.equal(store.appendToFile('self', 'summary.md', '\nLine D').status, 'appended');
 
-    // Write
-    const writeRes = await executors.notes_write_file({ path: 'summary.md', text: 'Line A\nLine B\nLine C' }, exec);
-    assert.equal(writeRes.status, 'written');
-    assert.equal(writeRes.path, 'agentY/notes/summary.md');
-
-    // Append
-    const appendRes = await executors.notes_append_to_file({ path: 'summary.md', text: '\nLine D' }, exec);
-    assert.equal(appendRes.status, 'appended');
-
-    // Read with line slice
-    const readRes = await executors.notes_read_file({ path: 'summary.md', start_line: 2, stop_line: 3 }, exec);
+    // Read with line slice, then character paging inside the slice.
+    const readRes = readNotes(store, 'notes_read_file', { path: 'summary.md', start_line: 2, stop_line: 3 });
     assert.equal(readRes.content, 'Line B\nLine C');
+    assert.equal(readRes.has_more, false);
+    const paged = readNotes(store, 'notes_read_file', { path: 'summary.md', offset_chars: 2, limit_chars: 4 });
+    assert.deepEqual([paged.content, paged.next_offset_chars, paged.total_chars], ['ne A', 6, 27]);
 
     // Search
-    const searchRes = await executors.notes_search_contents({ query: 'Line B' }, exec);
+    const searchRes = readNotes(store, 'notes_search_contents', { query: 'Line B' });
     assert.equal(searchRes.length, 1);
     assert.equal(searchRes[0].matches[0].line_number, 2);
+    assert.equal(searchRes[0].matches[0].truncated, false);
 
     // List by prefix
-    const listRes = await executors.notes_list_files_by_prefix({ prefix: '' }, exec);
+    const listRes = readNotes(store, 'notes_list_files_by_prefix', { prefix: '' });
     assert.equal(listRes.length, 1);
-    assert.equal(listRes[0].path, 'agentY/notes/summary.md');
+    assert.equal(listRes[0].path, 'self/notes/summary.md');
   });
 });
