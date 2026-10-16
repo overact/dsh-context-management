@@ -28,6 +28,19 @@ export const { SessionProjectionRegistry } = await dsh('dsh-session-projection')
 export const { ToolRuntime } = await dsh('dsh-tools');
 export const { CommandRuntime } = await dsh('dsh-commands');
 
+/**
+ * Mount the real JSONL backend. DSH <= 0.2.0 exports the backend class;
+ * 0.2.1+ exports only a plugin that provides the `sessionPersistence` service.
+ */
+export async function jsonlStorage(ctx, config) {
+  const storageModule = await dsh('dsh-session-persistence-jsonl');
+  const JsonlSessionPersistence = storageModule.JsonlSessionPersistence ?? storageModule.default;
+  if (typeof JsonlSessionPersistence === 'function') return new JsonlSessionPersistence(ctx, config);
+  const { packChunks, ...pluginConfig } = config;
+  await ctx.plugin(storageModule, pluginConfig).await();
+  return ctx.get('sessionPersistence');
+}
+
 import { installSettings } from './native-settings-fixture.mjs';
 
 export async function fixture(options = {}) {
@@ -50,9 +63,7 @@ export async function fixture(options = {}) {
   // Notes live under the Harness home; keep every fixture inside its temporary root.
   const previousHome = process.env.DSH_HOME;
   process.env.DSH_HOME = root;
-  const storageModule = await dsh('dsh-session-persistence-jsonl');
-  const JsonlSessionPersistence = storageModule.JsonlSessionPersistence ?? storageModule.default;
-  const storage = new JsonlSessionPersistence(ctx, { root, compression: 'none', packChunks: true });
+  const storage = await jsonlStorage(ctx, { root, compression: 'none', packChunks: true });
   ctx.on('session/flush', session => { persisted.set(session.id, structuredClone(session.snapshotEvents())); });
   const handles = new Map();
   const handleApi = typeof storage.open === 'function';

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fixture, user, Context, SessionStore, Session, dsh } from './helpers/dsh.js';
+import { fixture, user, Context, SessionStore, Session, jsonlStorage } from './helpers/dsh.js';
 import { SessionStateStore } from '../lib/session-state.js';
 import { HistoryStore } from '../lib/history-store.js';
 import { NoteRepository } from '../lib/note-repository.js';
@@ -25,9 +25,7 @@ test('real JSONL storage restores notes, windows and exact history through a fre
     await f.execute(a, 'new_context');
     await f.dispose();
     second = new Context(); new SessionStore(second);
-    const storageModule = await dsh('dsh-session-persistence-jsonl');
-    const JsonlSessionPersistence = storageModule.JsonlSessionPersistence ?? storageModule.default;
-    const storage = new JsonlSessionPersistence(second, { root, compression: 'none' });
+    const storage = await jsonlStorage(second, { root, compression: 'none' });
     let persisted;
     if (typeof storage.open === 'function') {
       const handle = await storage.open('disk-session', 'read');
